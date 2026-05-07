@@ -22,15 +22,8 @@ import {
 import { sendSignal } from '../lib/signaling'
 import { isMobileUA } from '../lib/platform'
 import { startOutgoingRing, stopOutgoingRing } from '../lib/sound'
-import { hexToNpub } from '../lib/dm'
 import Avatar from '../components/Avatar'
-
-function peerLabel(pubkey: string, contacts: Record<string, { name?: string; npub: string }>): string {
-  const c = contacts[pubkey]
-  if (c?.name) return c.name
-  const npub = c?.npub ?? hexToNpub(pubkey)
-  return `${npub.slice(0, 10)}...${npub.slice(-6)}`
-}
+import { contactDisplayName } from '../types/chat'
 
 function formatDuration(s: number): string {
   const m = Math.floor(s / 60).toString().padStart(2, '0')
@@ -107,12 +100,20 @@ export default function CallPage() {
     if (remoteVideoEl) remoteVideoEl.srcObject = remoteVideo ?? null
   }, [remoteVideoEl, remoteVideo])
 
+  // Set srcObject AND explicitly call play() — autoplay can be blocked on
+  // some browsers (mobile especially), and the receiver-side <audio> tags
+  // won't start without it. The user-gesture context from clicking Accept /
+  // Call is enough to unlock playback if we kick it off promptly.
   useEffect(() => {
-    if (remoteAudioEl) remoteAudioEl.srcObject = remoteAudio ?? null
+    if (!remoteAudioEl) return
+    remoteAudioEl.srcObject = remoteAudio ?? null
+    if (remoteAudio) remoteAudioEl.play().catch((e) => console.warn('voice play() blocked:', e))
   }, [remoteAudioEl, remoteAudio])
 
   useEffect(() => {
-    if (remoteScreenAudioEl) remoteScreenAudioEl.srcObject = remoteScreenAudio ?? null
+    if (!remoteScreenAudioEl) return
+    remoteScreenAudioEl.srcObject = remoteScreenAudio ?? null
+    if (remoteScreenAudio) remoteScreenAudioEl.play().catch((e) => console.warn('screen-audio play() blocked:', e))
   }, [remoteScreenAudioEl, remoteScreenAudio])
 
   useEffect(() => {
@@ -282,7 +283,7 @@ export default function CallPage() {
     }
   }
 
-  const label = effectivePubkey ? peerLabel(effectivePubkey, contacts) : '?'
+  const label = effectivePubkey ? contactDisplayName(contacts[effectivePubkey]) : '?'
   const callStatusText =
     status === 'connected' ? formatDuration(duration)
     : status === 'calling' ? 'Вызов...'
@@ -359,10 +360,11 @@ export default function CallPage() {
         </div>
       )}
 
-      {/* Volume controls. Voice slider is always available; the Broadcast
-          slider only appears when a separate screen-audio track is flowing
-          (PC↔PC scenario after renegotiation). */}
-      {(remoteAudio || remoteScreenAudioActive) && (
+      {/* Voice slider as long as the call has a remote audio stream. Broadcast
+          slider as long as the screen-audio transceiver exists — track.muted
+          polling is unreliable on some browsers, but the stream's mere presence
+          is enough to know we have a separate screen-audio channel. */}
+      {(remoteAudio || remoteScreenAudio) && (
         <div className="absolute bottom-24 left-4 flex flex-col gap-2 bg-swamp-darker/80 backdrop-blur border border-frog-dark/30 rounded-2xl px-3 py-2 z-10">
           {remoteAudio && (
             <div className="flex items-center gap-2 w-44">
@@ -379,10 +381,10 @@ export default function CallPage() {
               />
             </div>
           )}
-          {remoteScreenAudioActive && (
+          {remoteScreenAudio && (
             <div className="flex items-center gap-2 w-44">
-              <Volume2 size={14} className="text-frog-skin shrink-0" />
-              <span className="text-frog-skin text-[10px] uppercase tracking-wider w-16">Экран</span>
+              <Volume2 size={14} className={remoteScreenAudioActive ? 'text-frog-skin shrink-0' : 'text-lily-green/40 shrink-0'} />
+              <span className={(remoteScreenAudioActive ? 'text-frog-skin' : 'text-lily-green/40') + ' text-[10px] uppercase tracking-wider w-16'}>Экран</span>
               <input
                 type="range"
                 min={0}

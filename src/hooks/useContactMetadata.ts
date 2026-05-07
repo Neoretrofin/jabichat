@@ -5,7 +5,7 @@ import { useChatStore } from '../store/chatStore'
 
 export function useContactMetadata() {
   const { ndk, isConnected } = useNostrStore()
-  const { contacts, updateContactName, updateContactPicture } = useChatStore()
+  const { contacts, updateContactPublishedName, updateContactPicture } = useChatStore()
 
   useEffect(() => {
     if (!ndk || !isConnected) return
@@ -23,7 +23,9 @@ export function useContactMetadata() {
         const profile = JSON.parse(event.content)
         const name: string = profile.display_name || profile.name || ''
         const picture: string = profile.picture || ''
-        if (name) updateContactName(event.pubkey, name)
+        // Writes to publishedName (not the manual alias). The display layer
+        // prefers the manual alias when set so user-renames stay sticky.
+        if (name) updateContactPublishedName(event.pubkey, name)
         if (picture) updateContactPicture(event.pubkey, picture)
       } catch {
         // malformed kind 0 — skip

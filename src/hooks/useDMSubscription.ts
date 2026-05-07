@@ -28,6 +28,12 @@ export function useDMSubscription() {
       if (!inner || inner.kind !== NDKKind.PrivateDirectMessage) return
 
       const peer = peerPubkey(myPubkey, inner)
+      const createdAt = inner.created_at ?? Math.floor(Date.now() / 1000)
+
+      // If the user deleted this chat, drop relay replays of old messages
+      // from before the deletion. Fresh messages (sent after the chat was
+      // deleted) still come through and re-create the contact.
+      if (store.isDeletedBefore(peer, createdAt)) return
 
       // Auto-add unknown sender to contacts
       if (!store.contacts[peer]) {
@@ -38,7 +44,7 @@ export function useDMSubscription() {
         id: event.id,
         content: inner.content,
         senderPubkey: inner.pubkey,
-        createdAt: inner.created_at ?? Math.floor(Date.now() / 1000),
+        createdAt,
       }
 
       const isFromMe = inner.pubkey === myPubkey

@@ -7,12 +7,16 @@ interface GroupState {
   messages: Record<string, GroupMessage[]>
   unread: Record<string, number>
   lastActivity: Record<string, number>
+  // Tombstone (channelId -> unix-seconds at deletion). Same purpose as
+  // chatStore.deletedAt — stop relay replays from un-deleting a group.
+  deletedAt: Record<string, number>
   activeChannel: string | null
 
   addGroup: (group: Group) => void
   removeGroup: (id: string) => void
   addGroupMessage: (msg: GroupMessage, opts?: { incrementUnread?: boolean }) => void
   hasGroupMessage: (id: string) => boolean
+  isDeletedBefore: (channelId: string, createdAt: number) => boolean
   clearUnread: (channelId: string) => void
   setActiveChannel: (channelId: string | null) => void
 }
@@ -24,6 +28,7 @@ export const useGroupStore = create<GroupState>()(
       messages: {},
       unread: {},
       lastActivity: {},
+      deletedAt: {},
       activeChannel: null,
 
       addGroup: (group) =>
@@ -40,6 +45,7 @@ export const useGroupStore = create<GroupState>()(
             messages,
             unread,
             lastActivity,
+            deletedAt: { ...s.deletedAt, [id]: Math.floor(Date.now() / 1000) },
             activeChannel: s.activeChannel === id ? null : s.activeChannel,
           }
         }),
@@ -65,6 +71,11 @@ export const useGroupStore = create<GroupState>()(
         return Object.values(messages).some((msgs) => msgs.some((m) => m.id === id))
       },
 
+      isDeletedBefore: (channelId, createdAt) => {
+        const t = get().deletedAt[channelId]
+        return t !== undefined && createdAt < t
+      },
+
       clearUnread: (channelId) =>
         set((s) => ({ unread: { ...s.unread, [channelId]: 0 } })),
 
@@ -77,6 +88,7 @@ export const useGroupStore = create<GroupState>()(
         messages: s.messages,
         lastActivity: s.lastActivity,
         unread: s.unread,
+        deletedAt: s.deletedAt,
       }),
     }
   )

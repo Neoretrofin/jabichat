@@ -4,7 +4,7 @@ import { Phone, PhoneOff } from 'lucide-react'
 import { useCallStore } from '../store/callStore'
 import { useChatStore } from '../store/chatStore'
 import { useHangup } from '../hooks/useHangup'
-import { hexToNpub } from '../lib/dm'
+import { contactDisplayName } from '../types/chat'
 
 function formatDuration(s: number): string {
   const m = Math.floor(s / 60).toString().padStart(2, '0')
@@ -43,9 +43,7 @@ export default function FloatingCallIndicator() {
   const onCallPage = location.pathname.startsWith('/call/')
   if (!isActive || onCallPage || !peerPubkey) return null
 
-  const contact = contacts[peerPubkey]
-  const label = contact?.name
-    ?? `${(contact?.npub ?? hexToNpub(peerPubkey)).slice(0, 10)}...`
+  const label = contactDisplayName(contacts[peerPubkey])
 
   const statusText = status === 'connected' ? formatDuration(duration) : 'Соединение...'
 

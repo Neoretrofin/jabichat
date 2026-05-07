@@ -8,10 +8,7 @@ import AddContactModal from '../components/AddContactModal'
 import CreateGroupModal from '../components/CreateGroupModal'
 import ConfirmModal from '../components/ConfirmModal'
 import Avatar from '../components/Avatar'
-
-function shortKey(npub: string) {
-  return `${npub.slice(0, 10)}...${npub.slice(-6)}`
-}
+import { contactDisplayName } from '../types/chat'
 
 type ListItem =
   | { kind: 'dm'; pubkey: string; name: string; picture?: string; lastContent?: string; lastAt: number; unread: number }
@@ -37,7 +34,7 @@ export default function ChatsPage() {
       return {
         kind: 'dm' as const,
         pubkey: c.pubkey,
-        name: c.name ?? shortKey(c.npub),
+        name: contactDisplayName(c),
         picture: c.picture,
         lastContent: last?.content,
         lastAt: dmActivity[c.pubkey] ?? 0,

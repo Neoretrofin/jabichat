@@ -4,9 +4,9 @@ import { ArrowLeft, Send, Loader2, Pencil, Check, X, Phone } from 'lucide-react'
 import { useNostrStore } from '../store/nostrStore'
 import { useChatStore } from '../store/chatStore'
 import { useCallStore } from '../store/callStore'
-import { sendDM, hexToNpub } from '../lib/dm'
+import { sendDM } from '../lib/dm'
 import Avatar from '../components/Avatar'
-import type { Message } from '../types/chat'
+import { contactDisplayName, type Message } from '../types/chat'
 
 function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
@@ -46,8 +46,7 @@ export default function ChatPage() {
   const contact = pubkey ? contacts[pubkey] : undefined
   const chatMessages: Message[] = pubkey ? (messages[pubkey] ?? []) : []
 
-  const displayName = contact?.name
-    ?? (contact ? `${contact.npub.slice(0, 10)}...${contact.npub.slice(-6)}` : pubkey ? hexToNpub(pubkey).slice(0, 16) + '...' : '?')
+  const displayName = contactDisplayName(contact)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })

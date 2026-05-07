@@ -6,15 +6,8 @@ import { useNostrStore } from '../store/nostrStore'
 import { sendSignal } from '../lib/signaling'
 import { cleanup } from '../lib/webrtc'
 import { stopRingtone } from '../lib/sound'
-import { hexToNpub } from '../lib/dm'
 import Avatar from './Avatar'
-
-function callerLabel(pubkey: string, contacts: Record<string, { name?: string; npub: string }>): string {
-  const c = contacts[pubkey]
-  if (c?.name) return c.name
-  const npub = c?.npub ?? hexToNpub(pubkey)
-  return `${npub.slice(0, 10)}...${npub.slice(-6)}`
-}
+import { contactDisplayName } from '../types/chat'
 
 export default function IncomingCallModal() {
   const { status, peerPubkey, callId, accept: acceptCall, reset } = useCallStore()
@@ -24,8 +17,8 @@ export default function IncomingCallModal() {
 
   if (status !== 'ringing' || !peerPubkey || !callId) return null
 
-  const label = callerLabel(peerPubkey, contacts)
   const contact = contacts[peerPubkey]
+  const label = contactDisplayName(contact)
 
   const accept = () => {
     stopRingtone()

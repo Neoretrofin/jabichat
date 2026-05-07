@@ -12,7 +12,12 @@ import {
 import { startRingtone, stopRingtone } from '../lib/sound'
 import { npubToHex } from '../lib/dm'
 
-const MAX_SIGNAL_AGE_S = 600
+// Anything older than 30 s is treated as a phantom replay. Calls and ICE
+// candidates are inherently fresh — if the inner rumor's created_at is
+// further in the past, the relay is replaying old gift-wraps from when
+// the user last connected. NIP-17 randomizes the OUTER created_at for
+// privacy, so we filter on the inner rumor timestamp.
+const MAX_SIGNAL_AGE_S = 30
 
 export function useSignaling() {
   const { ndk, npub, isConnected } = useNostrStore()
@@ -27,7 +32,15 @@ export function useSignaling() {
     if (!ndk || !npub || !isConnected) return
 
     const myPubkey = npubToHex(npub)
-    const since = Math.floor(Date.now() / 1000) - 7 * 24 * 3600
+    // Relays return outer gift-wraps whose created_at is randomized up to
+    // ~2 days in the past, so we can't tighten `since` past that without
+    // missing live signals. The strict age filter on the inner rumor below
+    // is what actually rejects replays.
+    const since = Math.floor(Date.now() / 1000) - 2 * 24 * 3600
+
+    // Same gift-wrap can be delivered by multiple relays — dedupe by event id.
+    // (Event id is a hash, identical across relays for the same signal.)
+    const seen = new Set<string>()
 
     console.log('[signal] subscribing as', myPubkey.slice(0, 12), 'since', new Date(since * 1000).toISOString())
 
@@ -41,7 +54,10 @@ export function useSignaling() {
     })
 
     sub.on('event', async (event) => {
-      console.log('[signal] gift-wrap arrived id=', event.id?.slice(0, 12))
+      if (event.id) {
+        if (seen.has(event.id)) return
+        seen.add(event.id)
+      }
       const result = await decryptSignal(event)
       if (!result) return
 

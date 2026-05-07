@@ -6,19 +6,16 @@ import { useGroupStore } from '../store/groupStore'
 import { useChatStore } from '../store/chatStore'
 import { sendChannelMessage } from '../lib/channel'
 import { useChannelSubscription } from '../hooks/useChannelSubscription'
-import { hexToNpub } from '../lib/dm'
 import Avatar from '../components/Avatar'
 import type { GroupMessage } from '../types/group'
+import { contactDisplayName, type Contact } from '../types/chat'
 
 function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
 }
 
-function resolveSender(pubkey: string, contacts: Record<string, { name?: string; npub: string }>): string {
-  const c = contacts[pubkey]
-  if (c?.name) return c.name
-  const npub = c?.npub ?? hexToNpub(pubkey)
-  return `${npub.slice(0, 10)}...${npub.slice(-6)}`
+function resolveSender(pubkey: string, contacts: Record<string, Contact>): string {
+  return contactDisplayName(contacts[pubkey])
 }
 
 function GroupMessageBubble({

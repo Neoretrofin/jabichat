@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import NDK, { NDKEvent } from '@nostr-dev-kit/ndk'
+import NDK, { NDKEvent, NDKKind } from '@nostr-dev-kit/ndk'
 import { createNDK, generateNsec, nsecToNpub } from '../lib/ndk'
+import { npubToHex } from './../lib/dm'
 
 interface NostrState {
   nsec: string | null
@@ -18,6 +19,11 @@ interface NostrState {
   setProfileName: (name: string) => void
   setAvatar: (url: string | null) => void
   publishMetadata: () => Promise<void>
+  // Pulls the user's own latest kind:0 from relays and restores name + avatar.
+  // Idempotent and safe to call after every connect (login or persisted-nsec
+  // restore on app start). Does not overwrite locally-set values that don't
+  // match the published metadata — local edits during this round-trip win.
+  refreshOwnMetadata: () => Promise<void>
 }
 
 export const useNostrStore = create<NostrState>()(
@@ -59,7 +65,17 @@ export const useNostrStore = create<NostrState>()(
         if (ndk) {
           ndk.pool?.relays.forEach((relay) => relay.disconnect())
         }
-        set({ nsec: null, npub: null, ndk: null, isConnected: false, isConnecting: false, avatar: null })
+        // Also reset profile fields — relogin will repopulate from the new
+        // account's published kind:0 (see refreshOwnMetadata).
+        set({
+          nsec: null,
+          npub: null,
+          ndk: null,
+          isConnected: false,
+          isConnecting: false,
+          profileName: 'Аноним',
+          avatar: null,
+        })
       },
 
       publishMetadata: async () => {
@@ -74,6 +90,29 @@ export const useNostrStore = create<NostrState>()(
         })
         event.tags = []
         await event.publish()
+      },
+
+      refreshOwnMetadata: async () => {
+        const { ndk, npub } = get()
+        if (!ndk || !npub) return
+        try {
+          const myPubkey = npubToHex(npub)
+          const event = await ndk.fetchEvent({ kinds: [NDKKind.Metadata], authors: [myPubkey] })
+          if (!event) return
+          const profile = JSON.parse(event.content) as { name?: string; display_name?: string; picture?: string }
+          const fetchedName = profile.display_name || profile.name
+          const fetchedAvatar = profile.picture
+          const cur = get()
+          // Don't downgrade a name the user already typed locally to "Аноним".
+          // Prefer fetched name over default; otherwise keep current.
+          const nextName = fetchedName || cur.profileName
+          const nextAvatar = fetchedAvatar ?? cur.avatar
+          if (nextName !== cur.profileName || nextAvatar !== cur.avatar) {
+            set({ profileName: nextName, avatar: nextAvatar ?? null })
+          }
+        } catch (e) {
+          console.warn('[nostr] refreshOwnMetadata failed:', e)
+        }
       },
     }),
     {

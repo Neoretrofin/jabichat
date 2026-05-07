@@ -1,7 +1,20 @@
+// STUN alone is not enough for mobile carrier NAT (CGNAT) or strict
+// corporate firewalls — peers can complete DTLS but media RTP gets dropped.
+// openrelay.metered.ca is a free public TURN service (UDP+TCP+TLS variants)
+// that's been reliable for years; no API key required.
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ]
 
 // One audio transceiver + one video transceiver by default. Adding a second

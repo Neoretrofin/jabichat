@@ -30,12 +30,16 @@ export function useAllGroupsSubscription() {
       const channelId = event.tags.find((t) => t[0] === 'e')?.[1]
       if (!channelId || !store.groups[channelId]) return
 
+      const createdAt = event.created_at ?? Math.floor(Date.now() / 1000)
+      // Skip relay replays of messages from before the user deleted this group.
+      if (store.isDeletedBefore(channelId, createdAt)) return
+
       const msg: GroupMessage = {
         id: event.id,
         channelId,
         content: event.content,
         senderPubkey: event.pubkey,
-        createdAt: event.created_at ?? Math.floor(Date.now() / 1000),
+        createdAt,
       }
 
       const isFromMe = event.pubkey === myPubkey

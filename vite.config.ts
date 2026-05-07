@@ -22,6 +22,11 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // The manifest is served at <base>/manifest.webmanifest. Listing icon
+      // src without a leading slash makes the browser resolve them relative
+      // to the manifest URL — i.e. /jabichat/pwa-192x192.png on production —
+      // so they keep working under GitHub Pages' subpath. A leading slash
+      // would resolve to the GH Pages root and 404.
       manifest: {
         name: 'jabichat',
         short_name: 'jabichat',
@@ -31,8 +36,8 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         icons: [
-          { src: '/icon-192.svg', sizes: '192x192', type: 'image/svg+xml' },
-          { src: '/icon-512.svg', sizes: '512x512', type: 'image/svg+xml' },
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
     }),
