@@ -25,6 +25,11 @@ interface ChatState {
   clearUnread: (peerPubkey: string) => void
   setActiveChat: (peerPubkey: string | null) => void
   removeChat: (pubkey: string) => void
+  // Merge tombstones from another device's NIP-78 record. For each pubkey
+  // whose remote tombstone is newer than the local one, advance the local
+  // tombstone and drop messages older than it (the chat itself is dropped
+  // unless we already have fresh post-tombstone activity).
+  mergeDeletedAt: (remote: Record<string, number>) => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -125,6 +130,39 @@ export const useChatStore = create<ChatState>()(
             deletedAt: { ...s.deletedAt, [pubkey]: Math.floor(Date.now() / 1000) },
             activeChat: s.activeChat === pubkey ? null : s.activeChat,
           }
+        }),
+
+      mergeDeletedAt: (remote) =>
+        set((s) => {
+          let changed = false
+          const deletedAt = { ...s.deletedAt }
+          const contacts = { ...s.contacts }
+          const messages = { ...s.messages }
+          const unread = { ...s.unread }
+          const lastActivity = { ...s.lastActivity }
+          let activeChat = s.activeChat
+
+          for (const [pubkey, t] of Object.entries(remote)) {
+            const existing = deletedAt[pubkey] ?? 0
+            if (t <= existing) continue
+            deletedAt[pubkey] = t
+            changed = true
+
+            const oldMsgs = messages[pubkey] ?? []
+            const freshMsgs = oldMsgs.filter((m) => m.createdAt >= t)
+            if (freshMsgs.length === 0) {
+              delete contacts[pubkey]
+              delete messages[pubkey]
+              delete unread[pubkey]
+              delete lastActivity[pubkey]
+              if (activeChat === pubkey) activeChat = null
+            } else if (freshMsgs.length !== oldMsgs.length) {
+              messages[pubkey] = freshMsgs
+              lastActivity[pubkey] = freshMsgs[freshMsgs.length - 1].createdAt
+            }
+          }
+          if (!changed) return s
+          return { deletedAt, contacts, messages, unread, lastActivity, activeChat }
         }),
     }),
     {

@@ -5,6 +5,7 @@ import { useDMSubscription } from '../hooks/useDMSubscription'
 import { useContactMetadata } from '../hooks/useContactMetadata'
 import { useAllGroupsSubscription } from '../hooks/useAllGroupsSubscription'
 import { useCallController } from '../hooks/useCallController'
+import { useDeletedSync } from '../hooks/useDeletedSync'
 import IncomingCallModal from './IncomingCallModal'
 import FloatingCallIndicator from './FloatingCallIndicator'
 
@@ -19,6 +20,7 @@ export default function Layout() {
   useDMSubscription()
   useContactMetadata()
   useAllGroupsSubscription()
+  useDeletedSync()
   useCallController()
 
   return (

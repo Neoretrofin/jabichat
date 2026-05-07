@@ -19,6 +19,10 @@ interface GroupState {
   isDeletedBefore: (channelId: string, createdAt: number) => boolean
   clearUnread: (channelId: string) => void
   setActiveChannel: (channelId: string | null) => void
+  // Same role as chatStore.mergeDeletedAt — applies cross-device tombstones
+  // from the user's NIP-78 sync record, dropping group history older than
+  // the new tombstone.
+  mergeDeletedAt: (remote: Record<string, number>) => void
 }
 
 export const useGroupStore = create<GroupState>()(
@@ -80,6 +84,39 @@ export const useGroupStore = create<GroupState>()(
         set((s) => ({ unread: { ...s.unread, [channelId]: 0 } })),
 
       setActiveChannel: (channelId) => set({ activeChannel: channelId }),
+
+      mergeDeletedAt: (remote) =>
+        set((s) => {
+          let changed = false
+          const deletedAt = { ...s.deletedAt }
+          const groups = { ...s.groups }
+          const messages = { ...s.messages }
+          const unread = { ...s.unread }
+          const lastActivity = { ...s.lastActivity }
+          let activeChannel = s.activeChannel
+
+          for (const [channelId, t] of Object.entries(remote)) {
+            const existing = deletedAt[channelId] ?? 0
+            if (t <= existing) continue
+            deletedAt[channelId] = t
+            changed = true
+
+            const oldMsgs = messages[channelId] ?? []
+            const freshMsgs = oldMsgs.filter((m) => m.createdAt >= t)
+            if (freshMsgs.length === 0) {
+              delete groups[channelId]
+              delete messages[channelId]
+              delete unread[channelId]
+              delete lastActivity[channelId]
+              if (activeChannel === channelId) activeChannel = null
+            } else if (freshMsgs.length !== oldMsgs.length) {
+              messages[channelId] = freshMsgs
+              lastActivity[channelId] = freshMsgs[freshMsgs.length - 1].createdAt
+            }
+          }
+          if (!changed) return s
+          return { deletedAt, groups, messages, unread, lastActivity, activeChannel }
+        }),
     }),
     {
       name: 'jabichat-groups',

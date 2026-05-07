@@ -4,6 +4,8 @@ import { UserPlus, MessageCircle, Users, Phone, Trash2 } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
 import { useGroupStore } from '../store/groupStore'
 import { useCallStore } from '../store/callStore'
+import { useNostrStore } from '../store/nostrStore'
+import { publishDeletedRecord } from '../lib/syncDeleted'
 import AddContactModal from '../components/AddContactModal'
 import CreateGroupModal from '../components/CreateGroupModal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -25,6 +27,7 @@ export default function ChatsPage() {
   const { contacts, messages: dmMessages, lastActivity: dmActivity, unread: dmUnread, removeChat } = useChatStore()
   const { groups, messages: gMessages, lastActivity: gActivity, unread: gUnread, removeGroup } = useGroupStore()
   const { startOutgoing } = useCallStore()
+  const { ndk } = useNostrStore()
   const navigate = useNavigate()
 
   const items: ListItem[] = [
@@ -193,6 +196,13 @@ export default function ChatsPage() {
           onConfirm={() => {
             if (confirmDelete.kind === 'dm') removeChat(confirmDelete.pubkey)
             else removeGroup(confirmDelete.channelId)
+            // Mirror the new tombstone to relays so other devices stay in sync
+            // (NIP-78 replaceable event — only the latest matters).
+            if (ndk) {
+              const chats = useChatStore.getState().deletedAt
+              const groupsDeleted = useGroupStore.getState().deletedAt
+              publishDeletedRecord(ndk, { chats, groups: groupsDeleted })
+            }
             setConfirmDelete(null)
           }}
           onCancel={() => setConfirmDelete(null)}

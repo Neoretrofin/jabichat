@@ -4,7 +4,7 @@ import { ArrowLeft, Send, Loader2, Pencil, Check, X, Phone } from 'lucide-react'
 import { useNostrStore } from '../store/nostrStore'
 import { useChatStore } from '../store/chatStore'
 import { useCallStore } from '../store/callStore'
-import { sendDM } from '../lib/dm'
+import { buildDMRumor, publishDM } from '../lib/dm'
 import Avatar from '../components/Avatar'
 import { contactDisplayName, type Message } from '../types/chat'
 
@@ -79,25 +79,24 @@ export default function ChatPage() {
     setText('')
     setSending(true)
 
-    // Unique temp ID that won't collide with real event IDs
-    const tempId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const senderPubkey = (await ndk.signer!.user()).pubkey
-
-    addMessage(pubkey, {
-      id: tempId,
-      content,
-      senderPubkey,
-      createdAt: Math.floor(Date.now() / 1000),
-      pending: true,
-    })
-
     try {
-      await sendDM(ndk, pubkey, content)
-      // Mark the optimistic message as delivered — never remove it
-      updateMessage(pubkey, tempId, { pending: false })
+      const senderPubkey = (await ndk.signer!.user()).pubkey
+      // Build rumor up-front so the optimistic message uses the same id as the
+      // self-wrap that the relay will echo back via useDMSubscription.
+      const rumor = buildDMRumor(senderPubkey, pubkey, content)
+
+      addMessage(pubkey, {
+        id: rumor.id,
+        content,
+        senderPubkey,
+        createdAt: rumor.created_at,
+        pending: true,
+      })
+
+      await publishDM(ndk, pubkey, rumor)
+      updateMessage(pubkey, rumor.id, { pending: false })
     } catch (e) {
       console.error('Failed to send DM:', e)
-      // Leave the message visible but keep pending so user sees it wasn't delivered
     } finally {
       setSending(false)
     }
