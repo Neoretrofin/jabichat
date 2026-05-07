@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="40" fill="#1c2e26"/>
+  <!-- frog body -->
+  <ellipse cx="96" cy="108" rx="52" ry="44" fill="#22c55e"/>
+  <!-- frog head -->
+  <ellipse cx="96" cy="72" rx="44" ry="36" fill="#22c55e"/>
+  <!-- eyes -->
+  <circle cx="76" cy="58" r="14" fill="#16a34a"/>
+  <circle cx="116" cy="58" r="14" fill="#16a34a"/>
+  <circle cx="76" cy="58" r="7" fill="white"/>
+  <circle cx="116" cy="58" r="7" fill="white"/>
+  <circle cx="78" cy="56" r="4" fill="#141f1b"/>
+  <circle cx="118" cy="56" r="4" fill="#141f1b"/>
+  <!-- smile -->
+  <path d="M 76 86 Q 96 98 116 86" stroke="#141f1b" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <!-- nostrils -->
+  <circle cx="90" cy="79" r="3" fill="#16a34a"/>
+  <circle cx="102" cy="79" r="3" fill="#16a34a"/>
+  <!-- legs -->
+  <ellipse cx="52" cy="138" rx="22" ry="12" fill="#22c55e" transform="rotate(-20 52 138)"/>
+  <ellipse cx="140" cy="138" rx="22" ry="12" fill="#22c55e" transform="rotate(20 140 138)"/>
+</svg>
