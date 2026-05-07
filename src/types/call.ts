@@ -7,8 +7,6 @@ export type CallStatus = 'idle' | 'calling' | 'ringing' | 'accepting' | 'connect
 export type SignalType =
   | 'call-offer'
   | 'call-answer'
-  | 'sdp-offer'      // mid-call renegotiation (e.g. adding screen-audio transceiver)
-  | 'sdp-answer'
   | 'ice-candidate'
   | 'call-end'
   | 'call-reject'
@@ -17,7 +15,4 @@ export interface SignalPayload {
   type: SignalType
   callId: string
   data?: RTCSessionDescriptionInit | RTCIceCandidateInit | null
-  // Sent on call-offer / call-answer so peers know each other's platform
-  // and can decide whether multi-track audio is safe to negotiate.
-  mobile?: boolean
 }

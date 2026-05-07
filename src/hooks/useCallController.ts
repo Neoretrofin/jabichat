@@ -10,7 +10,6 @@ import {
   cleanup,
   type RemoteTrackKind,
 } from '../lib/webrtc'
-import { isMobileUA } from '../lib/platform'
 import { useHangup } from './useHangup'
 
 const NO_ANSWER_TIMEOUT_MS = 30000
@@ -49,11 +48,6 @@ export function useCallController() {
           const cs = useCallStore.getState()
           if (kind === 'voice') {
             cs.setRemoteAudio(stream)
-          } else if (kind === 'screen-audio') {
-            cs.setRemoteScreenAudio(stream)
-            cs.setRemoteScreenAudioActive(!track.muted)
-            track.onmute = () => useCallStore.getState().setRemoteScreenAudioActive(false)
-            track.onunmute = () => useCallStore.getState().setRemoteScreenAudioActive(true)
           } else if (kind === 'video') {
             cs.setRemoteVideo(stream)
             cs.setRemoteVideoActive(!track.muted)
@@ -96,7 +90,6 @@ export function useCallController() {
         if (cancelled) return
         useCallStore.getState().setMicStream(micStream)
 
-        const mobile = isMobileUA()
         if (role === 'offerer') {
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
@@ -105,7 +98,6 @@ export function useCallController() {
             type: 'call-offer',
             callId: callId!,
             data: offer,
-            mobile,
           })
         } else {
           const answer = await pc.createAnswer()
@@ -115,7 +107,6 @@ export function useCallController() {
             type: 'call-answer',
             callId: callId!,
             data: answer,
-            mobile,
           })
           useCallStore.getState().setStatus('connected')
         }

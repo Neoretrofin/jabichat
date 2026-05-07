@@ -7,7 +7,6 @@ import {
   applyRemoteDescription,
   addRemoteCandidate,
   cleanup,
-  answerRenegotiation,
 } from '../lib/webrtc'
 import { startRingtone, stopRingtone } from '../lib/sound'
 import { npubToHex } from '../lib/dm'
@@ -84,8 +83,6 @@ export function useSignaling() {
           }
           console.log('[signal] ringing — opening incoming call modal')
           store.setIncoming(senderPubkey, payload.callId, payload.data as RTCSessionDescriptionInit)
-          // Stash peer's platform — controller decides about multi-track audio later.
-          store.setPeerIsMobile(payload.mobile === true)
           break
         }
 
@@ -93,28 +90,6 @@ export function useSignaling() {
           if (store.callId !== payload.callId) return
           await applyRemoteDescription(payload.data as RTCSessionDescriptionInit)
           store.setStatus('connected')
-          store.setPeerIsMobile(payload.mobile === true)
-          break
-        }
-
-        case 'sdp-offer': {
-          // Mid-call renegotiation initiated by the peer (e.g. they added a
-          // screen-audio transceiver). Apply, answer, send back.
-          if (store.callId !== payload.callId) return
-          const answer = await answerRenegotiation(payload.data as RTCSessionDescriptionInit)
-          if (answer) {
-            await sendSignal(ndk, senderPubkey, {
-              type: 'sdp-answer',
-              callId: payload.callId,
-              data: answer,
-            }).catch(() => {})
-          }
-          break
-        }
-
-        case 'sdp-answer': {
-          if (store.callId !== payload.callId) return
-          await applyRemoteDescription(payload.data as RTCSessionDescriptionInit)
           break
         }
 

@@ -7,7 +7,6 @@ import {
 import { useCallStore } from '../store/callStore'
 import { useChatStore } from '../store/chatStore'
 import { useDeviceStore } from '../store/deviceStore'
-import { useNostrStore } from '../store/nostrStore'
 import { useHangup } from '../hooks/useHangup'
 import {
   startScreenShare,
@@ -19,8 +18,6 @@ import {
   setNoiseSuppression,
   supportsAudioOutputSelection,
 } from '../lib/webrtc'
-import { sendSignal } from '../lib/signaling'
-import { isMobileUA } from '../lib/platform'
 import { startOutgoingRing, stopOutgoingRing } from '../lib/sound'
 import Avatar from '../components/Avatar'
 import { contactDisplayName } from '../types/chat'
@@ -36,22 +33,17 @@ export default function CallPage() {
   const navigate = useNavigate()
 
   const status = useCallStore((s) => s.status)
-  const callId = useCallStore((s) => s.callId)
   const peerPubkey = useCallStore((s) => s.peerPubkey)
-  const peerIsMobile = useCallStore((s) => s.peerIsMobile)
   const micStream = useCallStore((s) => s.micStream)
   const camStream = useCallStore((s) => s.camStream)
   const screenStream = useCallStore((s) => s.screenStream)
   const remoteAudio = useCallStore((s) => s.remoteAudio)
-  const remoteScreenAudio = useCallStore((s) => s.remoteScreenAudio)
-  const remoteScreenAudioActive = useCallStore((s) => s.remoteScreenAudioActive)
   const remoteVideo = useCallStore((s) => s.remoteVideo)
   const remoteVideoActive = useCallStore((s) => s.remoteVideoActive)
   const shareHasAudio = useCallStore((s) => s.shareHasAudio)
   const micEnabled = useCallStore((s) => s.micEnabled)
   const camEnabled = useCallStore((s) => s.camEnabled)
   const voiceVolume = useCallStore((s) => s.voiceVolume)
-  const screenVolume = useCallStore((s) => s.screenVolume)
   const connectedAt = useCallStore((s) => s.connectedAt)
   const error = useCallStore((s) => s.error)
   const setMicEnabled = useCallStore((s) => s.setMicEnabled)
@@ -60,13 +52,10 @@ export default function CallPage() {
   const setScreenStream = useCallStore((s) => s.setScreenStream)
   const setShareHasAudio = useCallStore((s) => s.setShareHasAudio)
   const setVoiceVolume = useCallStore((s) => s.setVoiceVolume)
-  const setScreenVolume = useCallStore((s) => s.setScreenVolume)
   const setRemoteVideoActive = useCallStore((s) => s.setRemoteVideoActive)
-  const setRemoteScreenAudioActive = useCallStore((s) => s.setRemoteScreenAudioActive)
 
   const { contacts } = useChatStore()
   const devicePrefs = useDeviceStore()
-  const { ndk } = useNostrStore()
   const hangup = useHangup()
 
   const [duration, setDuration] = useState(0)
@@ -78,7 +67,6 @@ export default function CallPage() {
 
   const [remoteVideoEl, setRemoteVideoEl] = useState<HTMLVideoElement | null>(null)
   const [remoteAudioEl, setRemoteAudioEl] = useState<HTMLAudioElement | null>(null)
-  const [remoteScreenAudioEl, setRemoteScreenAudioEl] = useState<HTMLAudioElement | null>(null)
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
 
@@ -101,7 +89,7 @@ export default function CallPage() {
   }, [remoteVideoEl, remoteVideo])
 
   // Set srcObject AND explicitly call play() — autoplay can be blocked on
-  // some browsers (mobile especially), and the receiver-side <audio> tags
+  // some browsers (mobile especially), and the receiver-side <audio> tag
   // won't start without it. The user-gesture context from clicking Accept /
   // Call is enough to unlock playback if we kick it off promptly.
   useEffect(() => {
@@ -111,36 +99,21 @@ export default function CallPage() {
   }, [remoteAudioEl, remoteAudio])
 
   useEffect(() => {
-    if (!remoteScreenAudioEl) return
-    remoteScreenAudioEl.srcObject = remoteScreenAudio ?? null
-    if (remoteScreenAudio) remoteScreenAudioEl.play().catch((e) => console.warn('screen-audio play() blocked:', e))
-  }, [remoteScreenAudioEl, remoteScreenAudio])
-
-  useEffect(() => {
     if (remoteAudioEl) remoteAudioEl.volume = voiceVolume
   }, [remoteAudioEl, voiceVolume])
 
   useEffect(() => {
-    if (remoteScreenAudioEl) remoteScreenAudioEl.volume = screenVolume
-  }, [remoteScreenAudioEl, screenVolume])
+    if (!sinkSupported || !devicePrefs.audioOutputId || !remoteAudioEl) return
+    const sinkable = remoteAudioEl as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+    sinkable.setSinkId?.(devicePrefs.audioOutputId).catch((e) => {
+      console.warn('setSinkId failed:', e)
+    })
+  }, [remoteAudioEl, devicePrefs.audioOutputId, sinkSupported])
 
-  useEffect(() => {
-    if (!sinkSupported || !devicePrefs.audioOutputId) return
-    const apply = (el: HTMLAudioElement | null) => {
-      if (!el) return
-      const sinkable = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
-      sinkable.setSinkId?.(devicePrefs.audioOutputId!).catch((e) => {
-        console.warn('setSinkId failed:', e)
-      })
-    }
-    apply(remoteAudioEl)
-    apply(remoteScreenAudioEl)
-  }, [remoteAudioEl, remoteScreenAudioEl, devicePrefs.audioOutputId, sinkSupported])
-
-  // Bug 1 fix — track.onmute/onunmute can miss events on some browsers,
-  // leaving the receiver staring at a frozen last-frame after the peer ends
-  // their share/cam. Polling track.muted brings the avatar overlay back
-  // within 500ms of the peer stopping the stream.
+  // track.onmute/onunmute can miss events on some browsers, leaving the
+  // receiver staring at a frozen last-frame after the peer ends their
+  // share/cam. Polling track.muted brings the avatar overlay back within
+  // 500ms of the peer stopping the stream.
   useEffect(() => {
     if (!remoteVideo) return
     const track = remoteVideo.getVideoTracks()[0]
@@ -150,16 +123,6 @@ export default function CallPage() {
     const t = window.setInterval(sync, 500)
     return () => clearInterval(t)
   }, [remoteVideo, setRemoteVideoActive])
-
-  useEffect(() => {
-    if (!remoteScreenAudio) return
-    const track = remoteScreenAudio.getAudioTracks()[0]
-    if (!track) return
-    const sync = () => setRemoteScreenAudioActive(!track.muted)
-    sync()
-    const t = window.setInterval(sync, 500)
-    return () => clearInterval(t)
-  }, [remoteScreenAudio, setRemoteScreenAudioActive])
 
   useEffect(() => {
     if (status === 'calling') startOutgoingRing()
@@ -222,12 +185,7 @@ export default function CallPage() {
       return
     }
     try {
-      // Multi-track audio (separate broadcast volume) only works PC↔PC.
-      // Android mobile peers get the screen audio mixed into the voice
-      // stream, which keeps SDP single-audio-m-line — Android-safe.
-      const peerIsDesktop = !peerIsMobile && !isMobileUA()
-      const { stream, withSystemAudio, renegotiationOffer } = await startScreenShare({
-        peerIsDesktop,
+      const { stream, withSystemAudio } = await startScreenShare({
         onEnded: () => {
           setScreenStream(null)
           setShareHasAudio(false)
@@ -235,16 +193,6 @@ export default function CallPage() {
       })
       setScreenStream(stream)
       setShareHasAudio(withSystemAudio)
-
-      // If the multi-track path was used, addTrack created a fresh m-line —
-      // we must send the offer to the peer and let them answer.
-      if (renegotiationOffer && ndk && peerPubkey && callId) {
-        await sendSignal(ndk, peerPubkey, {
-          type: 'sdp-offer',
-          callId,
-          data: renegotiationOffer,
-        }).catch((e) => console.warn('sdp-offer send failed:', e))
-      }
     } catch (err) {
       if (!(err instanceof Error && err.name === 'NotAllowedError')) {
         console.error('Screen share failed:', err)
@@ -308,7 +256,6 @@ export default function CallPage() {
   return (
     <div ref={setContainerEl} className="relative flex flex-col h-[calc(100svh-56px-64px)] bg-swamp-darker overflow-hidden">
       <audio ref={setRemoteAudioEl} autoPlay playsInline className="hidden" />
-      <audio ref={setRemoteScreenAudioEl} autoPlay playsInline className="hidden" />
 
       <video
         ref={setRemoteVideoEl}
@@ -360,42 +307,19 @@ export default function CallPage() {
         </div>
       )}
 
-      {/* Voice slider as long as the call has a remote audio stream. Broadcast
-          slider as long as the screen-audio transceiver exists — track.muted
-          polling is unreliable on some browsers, but the stream's mere presence
-          is enough to know we have a separate screen-audio channel. */}
-      {(remoteAudio || remoteScreenAudio) && (
-        <div className="absolute bottom-24 left-4 flex flex-col gap-2 bg-swamp-darker/80 backdrop-blur border border-frog-dark/30 rounded-2xl px-3 py-2 z-10">
-          {remoteAudio && (
-            <div className="flex items-center gap-2 w-44">
-              <Volume2 size={14} className="text-lily-green/60 shrink-0" />
-              <span className="text-lily-green/60 text-[10px] uppercase tracking-wider w-16">Голос</span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={voiceVolume}
-                onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
-                className="flex-1 accent-frog-skin"
-              />
-            </div>
-          )}
-          {remoteScreenAudio && (
-            <div className="flex items-center gap-2 w-44">
-              <Volume2 size={14} className={remoteScreenAudioActive ? 'text-frog-skin shrink-0' : 'text-lily-green/40 shrink-0'} />
-              <span className={(remoteScreenAudioActive ? 'text-frog-skin' : 'text-lily-green/40') + ' text-[10px] uppercase tracking-wider w-16'}>Экран</span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={screenVolume}
-                onChange={(e) => setScreenVolume(parseFloat(e.target.value))}
-                className="flex-1 accent-frog-skin"
-              />
-            </div>
-          )}
+      {remoteAudio && (
+        <div className="absolute bottom-24 left-4 flex items-center gap-2 w-44 bg-swamp-darker/80 backdrop-blur border border-frog-dark/30 rounded-2xl px-3 py-2 z-10">
+          <Volume2 size={14} className="text-lily-green/60 shrink-0" />
+          <span className="text-lily-green/60 text-[10px] uppercase tracking-wider w-12">Звук</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={voiceVolume}
+            onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
+            className="flex-1 accent-frog-skin"
+          />
         </div>
       )}
 

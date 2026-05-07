@@ -1,7 +1,7 @@
 // STUN alone is not enough for mobile carrier NAT (CGNAT) or strict
 // corporate firewalls — peers can complete DTLS but media RTP gets dropped.
-// openrelay.metered.ca is a free public TURN service (UDP+TCP+TLS variants)
-// that's been reliable for years; no API key required.
+// openrelay.metered.ca is a free public TURN service (UDP+TCP+TLS variants);
+// no API key required.
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -17,14 +17,14 @@ const ICE_SERVERS: RTCIceServer[] = [
   },
 ]
 
-// One audio transceiver + one video transceiver by default. Adding a second
-// audio transceiver for screen audio is done lazily via `addScreenAudioTrackForRenegotiation`
-// and only when both peers self-identify as desktop, since some Android
-// Chrome builds break on >1 audio m-line.
+// Single audio + single video transceiver for the entire call. Screen audio
+// is mixed into the mic track at the Web Audio layer on the sender side, so
+// the SDP shape never changes after the initial offer/answer. This avoids
+// SDP renegotiation entirely — Android Chrome and some desktop builds had
+// trouble carrying media on a second audio m-line added mid-call.
 let _pc: RTCPeerConnection | null = null
 let _audioSender: RTCRtpSender | null = null
 let _videoSender: RTCRtpSender | null = null
-let _screenAudioSender: RTCRtpSender | null = null
 
 let _micStream: MediaStream | null = null
 let _camStream: MediaStream | null = null
@@ -34,7 +34,7 @@ let _audioMixContext: AudioContext | null = null
 let _pendingCandidates: RTCIceCandidateInit[] = []
 let _remoteDescReady = false
 
-export type RemoteTrackKind = 'voice' | 'screen-audio' | 'video'
+export type RemoteTrackKind = 'voice' | 'video'
 export type OnIceCandidate = (candidate: RTCIceCandidateInit) => void
 export type OnRemoteTrack = (kind: RemoteTrackKind, stream: MediaStream, track: MediaStreamTrack) => void
 export type OnConnectionState = (state: RTCPeerConnectionState) => void
@@ -55,14 +55,6 @@ function buildAudioConstraints(deviceId: string | null | undefined, noiseSuppres
   return c
 }
 
-// Classify an audio transceiver by its position among audio transceivers.
-// First audio = voice (always present); second audio = screen-audio
-// (created lazily by renegotiation when both peers are desktop).
-function classifyAudio(pc: RTCPeerConnection, transceiver: RTCRtpTransceiver): 'voice' | 'screen-audio' {
-  const audios = pc.getTransceivers().filter((t) => isAudioTransceiver(t))
-  return audios.indexOf(transceiver) === 0 ? 'voice' : 'screen-audio'
-}
-
 function isAudioTransceiver(t: RTCRtpTransceiver): boolean {
   return t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
 }
@@ -78,11 +70,16 @@ export function createPeerConnection(
   }
   _audioSender = null
   _videoSender = null
-  _screenAudioSender = null
   _pendingCandidates = []
   _remoteDescReady = false
 
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const pc = new RTCPeerConnection({
+    iceServers: ICE_SERVERS,
+    // max-bundle keeps every m-line on a single ICE/DTLS transport — fewer
+    // NAT pinholes, less to fail across phone↔PC.
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
+  })
   _pc = pc
 
   pc.onicecandidate = (e) => {
@@ -91,15 +88,19 @@ export function createPeerConnection(
 
   pc.ontrack = (e) => {
     if (e.track.kind === 'audio') {
-      const kind = classifyAudio(pc, e.transceiver)
-      onRemoteTrack(kind, new MediaStream([e.track]), e.track)
+      onRemoteTrack('voice', new MediaStream([e.track]), e.track)
     } else if (e.track.kind === 'video') {
       onRemoteTrack('video', new MediaStream([e.track]), e.track)
     }
   }
 
   pc.onconnectionstatechange = () => {
+    console.log('[webrtc] connectionState=', pc.connectionState)
     onConnectionState(pc.connectionState)
+  }
+
+  pc.oniceconnectionstatechange = () => {
+    console.log('[webrtc] iceConnectionState=', pc.iceConnectionState)
   }
 
   if (role === 'offerer') {
@@ -112,19 +113,13 @@ export function createPeerConnection(
 }
 
 function refreshSenders(pc: RTCPeerConnection): void {
-  // Walk transceivers to identify senders by kind + position. The screen-
-  // audio sender (if any) is the second audio transceiver.
   const ts = pc.getTransceivers()
-  let audioSeen = 0
   _audioSender = null
   _videoSender = null
-  _screenAudioSender = null
   for (const t of ts) {
-    if (t.direction === 'recvonly') t.direction = 'sendrecv'
+    if (t.direction === 'recvonly' || t.direction === 'inactive') t.direction = 'sendrecv'
     if (isAudioTransceiver(t)) {
-      if (audioSeen === 0) _audioSender = t.sender
-      else if (audioSeen === 1) _screenAudioSender = t.sender
-      audioSeen += 1
+      if (!_audioSender) _audioSender = t.sender
     } else if (t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video') {
       if (!_videoSender) _videoSender = t.sender
     }
@@ -171,15 +166,9 @@ export async function disableCamera(): Promise<void> {
 export interface ScreenShareResult {
   stream: MediaStream
   withSystemAudio: boolean
-  /** True when screen audio is sent on a separate transceiver. False = mixed into mic. */
-  separateAudioChannel: boolean
-  /** When non-null, caller MUST send this offer to the peer via signaling and
-   *  apply the answer by calling applyRemoteDescription, to complete renegotiation. */
-  renegotiationOffer: RTCSessionDescriptionInit | null
 }
 
 export async function startScreenShare(opts: {
-  peerIsDesktop: boolean
   onEnded?: () => void
 }): Promise<ScreenShareResult> {
   const dmOpts = {
@@ -213,43 +202,20 @@ export async function startScreenShare(opts: {
     }
   }
 
+  // Always mix screen audio into the existing mic track. Single audio m-line
+  // means no SDP renegotiation, no second-transceiver classification edge
+  // cases — works the same on PC↔PC and PC↔mobile. Side effect: receiver
+  // hears voice + screen audio mixed; cannot adjust them independently.
   let withSystemAudio = false
-  let separateAudioChannel = false
-  let renegotiationOffer: RTCSessionDescriptionInit | null = null
-
   if (screenAudio) {
-    if (opts.peerIsDesktop && _pc) {
-      // Desktop ↔ desktop: send screen audio on its own transceiver so the
-      // listener can adjust voice and broadcast volume independently.
-      try {
-        if (!_screenAudioSender) {
-          _screenAudioSender = _pc.addTrack(screenAudio, new MediaStream([screenAudio]))
-          // addTrack creates a new transceiver — needs SDP renegotiation.
-          const offer = await _pc.createOffer()
-          await _pc.setLocalDescription(offer)
-          renegotiationOffer = offer
-        } else {
-          await _screenAudioSender.replaceTrack(screenAudio)
-        }
-        withSystemAudio = true
-        separateAudioChannel = true
-      } catch (e) {
-        console.warn('[webrtc] separate screen-audio channel failed, falling back to mix:', e)
-        await mixScreenAudioIntoMic(screenAudio)
-        withSystemAudio = !!_audioMixContext
-      }
-    } else {
-      // Mobile peer (or no PC): mix screen audio into mic. Single audio
-      // m-line — Android-safe.
-      await mixScreenAudioIntoMic(screenAudio)
-      withSystemAudio = !!_audioMixContext
-    }
+    await mixScreenAudioIntoMic(screenAudio)
+    withSystemAudio = !!_audioMixContext
   }
 
   if (screenVideo && opts.onEnded) {
     screenVideo.addEventListener('ended', opts.onEnded)
   }
-  return { stream, withSystemAudio, separateAudioChannel, renegotiationOffer }
+  return { stream, withSystemAudio }
 }
 
 async function mixScreenAudioIntoMic(screenAudio: MediaStreamTrack): Promise<void> {
@@ -290,7 +256,7 @@ export async function stopScreenShare(): Promise<void> {
       }
     } catch { /* ignore */ }
   }
-  // Mixed-into-mic case: tear the mix down, restore mic-only audio
+  // Tear the mix down, restore mic-only audio on the existing audio sender.
   if (_audioMixContext) {
     await _audioMixContext.close().catch(() => {})
     _audioMixContext = null
@@ -298,11 +264,6 @@ export async function stopScreenShare(): Promise<void> {
       const micTrack = _micStream.getAudioTracks()[0] ?? null
       await _audioSender.replaceTrack(micTrack)
     }
-  }
-  // Separate-channel case: drop the screen-audio track, keep the
-  // transceiver alive so subsequent shares don't need another renegotiation.
-  if (_screenAudioSender) {
-    await _screenAudioSender.replaceTrack(null)
   }
 }
 
@@ -370,16 +331,6 @@ export async function applyRemoteDescription(desc: RTCSessionDescriptionInit): P
   _pendingCandidates = []
 }
 
-// Used by the answerer side of a renegotiation. Applies the incoming offer,
-// produces a matching answer, and returns it for the caller to send.
-export async function answerRenegotiation(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit | null> {
-  if (!_pc) return null
-  await applyRemoteDescription(offer)
-  const answer = await _pc.createAnswer()
-  await _pc.setLocalDescription(answer)
-  return answer
-}
-
 export async function addRemoteCandidate(candidate: RTCIceCandidateInit): Promise<void> {
   if (!_pc) return
   if (_remoteDescReady) {
@@ -401,7 +352,6 @@ export function cleanup(): void {
   _screenStream = null
   _audioSender = null
   _videoSender = null
-  _screenAudioSender = null
   _audioMixContext = null
   _pendingCandidates = []
   _remoteDescReady = false
