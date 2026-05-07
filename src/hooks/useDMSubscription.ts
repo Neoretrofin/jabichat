@@ -46,11 +46,16 @@ export function useDMSubscription() {
         store.addContact({ pubkey: peer, npub: hexToNpub(peer) })
       }
 
+      const replyToId = inner.tags.find(
+        (t: string[]) => t[0] === 'e' && t[3] === 'reply'
+      )?.[1]
+
       const message: Message = {
         id: messageId,
         content: inner.content,
         senderPubkey: inner.pubkey,
         createdAt,
+        ...(replyToId ? { replyToId } : {}),
       }
 
       const isFromMe = inner.pubkey === myPubkey

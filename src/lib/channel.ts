@@ -35,11 +35,19 @@ export async function joinChannel(ndk: NDK, channelId: string): Promise<Group | 
   }
 }
 
-export async function sendChannelMessage(ndk: NDK, channelId: string, text: string): Promise<NDKEvent> {
+export async function sendChannelMessage(
+  ndk: NDK,
+  channelId: string,
+  text: string,
+  replyToId?: string
+): Promise<NDKEvent> {
   const event = new NDKEvent(ndk)
   event.kind = 42 as NDKKind
   event.content = text
-  event.tags = [['e', channelId, '', 'root']]
+  const tags: string[][] = [['e', channelId, '', 'root']]
+  if (replyToId) tags.push(['e', replyToId, '', 'reply'])
+  event.tags = tags
   await event.publish()
   return event
 }
+

@@ -22,4 +22,5 @@ export interface Message {
   senderPubkey: string
   createdAt: number
   pending?: boolean
+  replyToId?: string
 }

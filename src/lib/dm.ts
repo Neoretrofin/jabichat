@@ -23,13 +23,20 @@ export interface DMRumor {
 // Deterministic rumor id so the optimistic message in ChatPage and the
 // self-wrap that comes back through useDMSubscription share the same id —
 // hasMessage() then dedups naturally without content-matching heuristics.
-export function buildDMRumor(senderPubkey: string, recipientPubkey: string, text: string): DMRumor {
+export function buildDMRumor(
+  senderPubkey: string,
+  recipientPubkey: string,
+  text: string,
+  replyToId?: string
+): DMRumor {
   const created_at = Math.floor(Date.now() / 1000)
+  const tags: string[][] = [['p', recipientPubkey]]
+  if (replyToId) tags.push(['e', replyToId, '', 'reply'])
   const raw = {
     pubkey: senderPubkey,
     kind: NDKKind.PrivateDirectMessage,
     created_at,
-    tags: [['p', recipientPubkey]],
+    tags,
     content: text,
   }
   const id = getEventHash(raw as Parameters<typeof getEventHash>[0])

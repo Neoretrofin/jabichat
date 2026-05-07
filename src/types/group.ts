@@ -13,4 +13,5 @@ export interface GroupMessage {
   content: string
   senderPubkey: string
   createdAt: number
+  replyToId?: string
 }
