@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* Tailwind v4 reads @theme tokens once; values become `var(--color-*)`
+   references in generated utilities, so overriding the variables under a
+   `[data-theme="..."]` selector swaps the whole palette at runtime. */
+@theme {
+  --color-swamp-dark: #1c2e26;
+  --color-swamp-darker: #141f1b;
+  --color-lily-green: #86efac;
+  --color-lily-light: #bbf7d0;
+  --color-frog-skin: #22c55e;
+  --color-frog-dark: #16a34a;
+  --color-mud-brown: #451a03;
+  --color-mud-light: #78350f;
+  --color-pond-blue: #164e63;
+}
+
+/* Original (default) — toad swamp. Explicit attribute kept for symmetry. */
+[data-theme="jabi"] {
+  --color-swamp-dark: #1c2e26;
+  --color-swamp-darker: #141f1b;
+  --color-lily-green: #86efac;
+  --color-lily-light: #bbf7d0;
+  --color-frog-skin: #22c55e;
+  --color-frog-dark: #16a34a;
+  --color-mud-brown: #451a03;
+  --color-mud-light: #78350f;
+  --color-pond-blue: #164e63;
+}
+
+/* Neutral dark — keeps the frog-skin green as accent so action buttons
+   still pop, but page chrome and text drop the green tint. */
+[data-theme="dark"] {
+  --color-swamp-dark: #1f2937;
+  --color-swamp-darker: #111827;
+  --color-lily-green: #f3f4f6;
+  --color-lily-light: #e5e7eb;
+  --color-frog-skin: #22c55e;
+  --color-frog-dark: #16a34a;
+  --color-mud-brown: #374151;
+  --color-mud-light: #4b5563;
+  --color-pond-blue: #1e3a8a;
+}
+
+/* Light theme — `lily-green` carries primary-text role, so it remaps to a
+   readable dark gray. Backgrounds become white/near-white. Frog accent
+   stays the same. */
+[data-theme="light"] {
+  --color-swamp-dark: #ffffff;
+  --color-swamp-darker: #f3f4f6;
+  --color-lily-green: #1f2937;
+  --color-lily-light: #374151;
+  --color-frog-skin: #16a34a;
+  --color-frog-dark: #15803d;
+  --color-mud-brown: #d1d5db;
+  --color-mud-light: #9ca3af;
+  --color-pond-blue: #1e40af;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-swamp-dark);
+  color: var(--color-lily-green);
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
