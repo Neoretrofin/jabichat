@@ -70,7 +70,9 @@ export function createPeerConnection(
   }
   _audioSender = null
   _videoSender = null
-  _pendingCandidates = []
+  // Keep _pendingCandidates intact: when answering, ICE candidates from the
+  // peer may have arrived while we were still in 'ringing' (no pc yet).
+  // Dropping them here was the cause of phone→PC calls hanging on 'checking'.
   _remoteDescReady = false
 
   const pc = new RTCPeerConnection({
@@ -332,8 +334,10 @@ export async function applyRemoteDescription(desc: RTCSessionDescriptionInit): P
 }
 
 export async function addRemoteCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-  if (!_pc) return
-  if (_remoteDescReady) {
+  // Buffer until pc exists AND remote description is set. The pc may still be
+  // null on the answerer side while the user hasn't pressed Accept yet — those
+  // candidates must be kept, not dropped, or trickle ICE never converges.
+  if (_pc && _remoteDescReady) {
     try { await _pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch { /* ignore */ }
   } else {
     _pendingCandidates.push(candidate)
