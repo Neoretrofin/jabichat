@@ -1,56 +1,108 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import type { ReactNode } from 'react'
 
 import { GNOLICHKA_EMOJIS_SHORTCODES } from '../lib/customEmojis'
 
-// Curated emoji set grouped by category. These are plain Unicode —
-// they travel as regular text inside the Nostr message `content` field,
-// so the decentralised architecture stays 100 % intact.
-const EMOJI_CATEGORIES: Record<string, string[]> = {
-  '😀 Смайлы': [
-    '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃',
-    '😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙',
-    '🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢',
-    '🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏',
-    '😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷',
-    '🤒','🤕','🤢','🤮','🥴','😵','🤯','🥳','🥸','😎',
-    '🤓','🧐','😕','🫤','😟','🙁','😮','😯','😲','😳',
-    '🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱',
-    '😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠',
-    '🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻',
-    '👽','👾','🤖',
-  ],
-  '🐸 Жабки': [
-    '🐸','🐊','🐢','🦎','🐍','🐲','🌿','🍀','🌱','🪷',
-    '🌸','🌼','🌻','🌺','💐','🪴','🌵','🍃','🍂','🍁',
-    '🍄','🪺','🦋','🐛','🐌','🐞','🐝','🦗','🪲','🪱',
-  ],
-  '👋 Жесты': [
-    '👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌',
-    '🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉',
-    '👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛',
-    '🤜','👏','🙌','🫶','👐','🤲','🤝','🙏',
-  ],
-  '❤️ Сердца': [
-    '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔',
-    '❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓','💗','💖','💘','💝',
-    '💟','♥️','💋','💌',
-  ],
-  '🎉 Объекты': [
-    '🎉','🎊','🎈','🎁','🎀','🏆','🥇','🥈','🥉','⚽',
-    '🏀','🎮','🎯','🎲','🔔','🎵','🎶','🎤','🎧','📱',
-    '💻','⌨️','🖥️','📷','💡','🔦','📚','✏️','📝','💰',
-    '💎','🔑','🗝️','🔒','🔓','🛡️','⚙️','🔧','🧲','🧪',
-  ],
-  '🍕 Еда': [
-    '🍕','🍔','🍟','🌭','🌮','🌯','🥙','🧆','🍗','🥩',
-    '🍖','🧀','🥚','🍳','🥞','🧇','🥐','🍞','🥖','🥨',
-    '🍰','🎂','🧁','🍩','🍪','🍫','🍬','🍭','🍿','☕',
-    '🍵','🧃','🥤','🍺','🍻','🥂','🍷','🍹','🧊',
-  ],
-  '🧌 Гнолички': GNOLICHKA_EMOJIS_SHORTCODES,
+interface EmojiCategory {
+  id: string
+  label: string
+  icon: ReactNode
+  emojis: string[]
 }
 
-const CATEGORIES = Object.keys(EMOJI_CATEGORIES)
+// Curated emoji set grouped by category. Plain Unicode entries travel as
+// regular text inside the Nostr message `content` field, so the
+// decentralised architecture stays 100 % intact. Custom-emoji entries
+// travel as `:NNN:` shortcodes which are resolved to PNGs at render time.
+const EMOJI_CATEGORIES: EmojiCategory[] = [
+  {
+    id: 'smiley',
+    label: 'Смайлы',
+    icon: '😀',
+    emojis: [
+      '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃',
+      '😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙',
+      '🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🫢',
+      '🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏',
+      '😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷',
+      '🤒','🤕','🤢','🤮','🥴','😵','🤯','🥳','🥸','😎',
+      '🤓','🧐','😕','🫤','😟','🙁','😮','😯','😲','😳',
+      '🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱',
+      '😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠',
+      '🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻',
+      '👽','👾','🤖',
+    ],
+  },
+  {
+    id: 'frogs',
+    label: 'Жабки',
+    icon: '🐸',
+    emojis: [
+      '🐸','🐊','🐢','🦎','🐍','🐲','🌿','🍀','🌱','🪷',
+      '🌸','🌼','🌻','🌺','💐','🪴','🌵','🍃','🍂','🍁',
+      '🍄','🪺','🦋','🐛','🐌','🐞','🐝','🦗','🪲','🪱',
+    ],
+  },
+  {
+    id: 'gestures',
+    label: 'Жесты',
+    icon: '👋',
+    emojis: [
+      '👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌',
+      '🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉',
+      '👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛',
+      '🤜','👏','🙌','🫶','👐','🤲','🤝','🙏',
+    ],
+  },
+  {
+    id: 'hearts',
+    label: 'Сердца',
+    icon: '❤️',
+    emojis: [
+      '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔',
+      '❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓','💗','💖','💘','💝',
+      '💟','♥️','💋','💌',
+    ],
+  },
+  {
+    id: 'objects',
+    label: 'Объекты',
+    icon: '🎉',
+    emojis: [
+      '🎉','🎊','🎈','🎁','🎀','🏆','🥇','🥈','🥉','⚽',
+      '🏀','🎮','🎯','🎲','🔔','🎵','🎶','🎤','🎧','📱',
+      '💻','⌨️','🖥️','📷','💡','🔦','📚','✏️','📝','💰',
+      '💎','🔑','🗝️','🔒','🔓','🛡️','⚙️','🔧','🧲','🧪',
+    ],
+  },
+  {
+    id: 'food',
+    label: 'Еда',
+    icon: '🍕',
+    emojis: [
+      '🍕','🍔','🍟','🌭','🌮','🌯','🥙','🧆','🍗','🥩',
+      '🍖','🧀','🥚','🍳','🥞','🧇','🥐','🍞','🥖','🥨',
+      '🍰','🎂','🧁','🍩','🍪','🍫','🍬','🍭','🍿','☕',
+      '🍵','🧃','🥤','🍺','🍻','🥂','🍷','🍹','🧊',
+    ],
+  },
+  {
+    id: 'gnolichka',
+    label: 'Гноличка',
+    icon: (
+      <img
+        src={`${import.meta.env.BASE_URL}gnolichka_emoji/064.png`}
+        alt="Гноличка"
+        className="w-5 h-5 inline-block object-contain pointer-events-none"
+      />
+    ),
+    emojis: GNOLICHKA_EMOJIS_SHORTCODES,
+  },
+]
+
+const CATEGORY_BY_ID: Record<string, EmojiCategory> = Object.fromEntries(
+  EMOJI_CATEGORIES.map((c) => [c.id, c])
+)
 
 // Recently-used emoji (persisted in localStorage under a dedicated key
 // so it doesn't pollute the Nostr stores).
@@ -69,6 +121,9 @@ interface EmojiPickerProps {
   /** Insert emoji at cursor / append to input value. */
   onSelect: (emoji: string) => void
   onClose: () => void
+  /** Toggle button — clicks on it must NOT count as outside-click,
+   *  otherwise mousedown closes the picker right before onClick reopens it. */
+  excludeRef?: React.RefObject<HTMLElement | null>
 }
 
 function renderEmojiItem(emoji: string) {
@@ -80,8 +135,8 @@ function renderEmojiItem(emoji: string) {
   return emoji
 }
 
-export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
-  const [activeCategory, setActiveCategory] = useState(CATEGORIES[0])
+export default function EmojiPicker({ onSelect, onClose, excludeRef }: EmojiPickerProps) {
+  const [activeCategory, setActiveCategory] = useState(EMOJI_CATEGORIES[0].id)
   const [search, setSearch] = useState('')
   const [recent, setRecent] = useState(loadRecent)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -89,13 +144,14 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose()
-      }
+      const target = e.target as Node
+      if (panelRef.current && panelRef.current.contains(target)) return
+      if (excludeRef?.current && excludeRef.current.contains(target)) return
+      onClose()
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
+  }, [onClose, excludeRef])
 
   // Close on Escape
   useEffect(() => {
@@ -114,14 +170,11 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   // Flat filtered list when searching
   const filtered = useMemo(() => {
     if (!search.trim()) return null
-    const all = Object.values(EMOJI_CATEGORIES).flat()
-    // Simple substring match on the emoji character itself (works for
-    // searches like "🐸"). For the category headers we already have
-    // a descriptive Russian label so most users will browse by category.
+    const all = EMOJI_CATEGORIES.flatMap((c) => c.emojis)
     return all.filter((e) => e.includes(search.trim()))
   }, [search])
 
-  const visibleEmoji: string[] = filtered ?? EMOJI_CATEGORIES[activeCategory] ?? []
+  const visibleEmoji: string[] = filtered ?? CATEGORY_BY_ID[activeCategory]?.emojis ?? []
 
   return (
     <div
@@ -156,18 +209,18 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
               🕑
             </button>
           )}
-          {CATEGORIES.map((cat) => (
+          {EMOJI_CATEGORIES.map((cat) => (
             <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`shrink-0 px-2 py-1 rounded-lg text-sm transition-colors ${
-                activeCategory === cat
+              key={cat.id}
+              onClick={() => setActiveCategory(cat.id)}
+              className={`shrink-0 px-2 py-1 rounded-lg text-sm transition-colors flex items-center justify-center ${
+                activeCategory === cat.id
                   ? 'bg-frog-skin/20 text-frog-skin'
                   : 'text-lily-green/50 hover:text-lily-green'
               }`}
-              title={cat}
+              title={cat.label}
             >
-              {cat.split(' ')[0]}
+              {cat.icon}
             </button>
           ))}
         </div>

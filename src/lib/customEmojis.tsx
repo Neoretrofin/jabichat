@@ -1,28 +1,37 @@
+import type { ReactNode } from 'react'
 
-export const CUSTOM_EMOJIS = [
-  '11', '22', '324321', '333', '3332', '346534', '4', '4334', '434', '4343', '4343434', '47уц73ц', '6219745', '853904', '868', '876379', '9673467596', 'Press F', 'Альтуха1', 'Аска4', 'Ахуй', 'БУУ', 'Бааака', 'Бандиты на 6 часов', 'Бимба', 'Бляяя', 'Вискарик', 'Воздушный поцелуй', 'Восторг', 'ГО', 'ГРУППА ПОДТЯНУТЬСЯ', 'Гладит жабь', 'Гладить1', 'Глупыха', 'Гноль Чмоль', 'Горничная флиртушка', 'Господи помоги', 'Грусть-печаль', 'Да хезе', 'Ерохин, не бегай', 'Жапанес гоблин', 'Жокерж', 'Злючка пиздючка 2', 'Извинись', 'Качкуха2', 'Кимчи', 'Крутецк', 'Лапушки', 'Лошара', 'Макима3', 'Надоел', 'Не в себе', 'Недовольнич', 'Нет!', 'Ну вот!', 'Обедик', 'Обидка1', 'Очко', 'Пис', 'Плаки', 'Пледик', 'Привет-пока', 'Противный', 'Резе4', 'Ржу', 'Ругается', 'Сердешко', 'Слёзка555', 'Слёзный ручей1', 'Смуг фейс', 'Смущашки', 'Сонная', 'Спить', 'Средаа', 'Стыдненько', 'Тссс', 'Тупица 3', 'Угроза2', 'Фейспалм', 'Хмм', 'Хуяссе1', 'Цветочки', 'Чмоки на ночь 2', 'Шо', 'ЫАА((('
-]
+export const CUSTOM_EMOJIS = Array.from({ length: 85 }, (_, i) =>
+  String(i + 1).padStart(3, '0')
+)
 
 export const GNOLICHKA_EMOJIS_SHORTCODES = CUSTOM_EMOJIS.map(name => `:${name}:`)
 
-export function renderMessageContent(content: string) {
+interface RenderOpts {
+  /** Smaller custom-emoji <img> for compact contexts like the chat-list
+   *  preview (`text-xs`, 16px line-height). Without this, 24px images blow
+   *  up the row. */
+  compact?: boolean
+}
+
+export function renderMessageContent(content: string, opts?: RenderOpts): ReactNode {
   if (!content) return content
 
-  // Разбиваем по паттерну :имя_эмодзи:
+  const sizeClass = opts?.compact ? 'w-4 h-4' : 'w-6 h-6'
+
   const parts = content.split(/(:[^:\n]+:)/g)
-  
+
   return parts.map((part, i) => {
     if (part.startsWith(':') && part.endsWith(':')) {
       const name = part.slice(1, -1)
       if (CUSTOM_EMOJIS.includes(name)) {
         const src = `${import.meta.env.BASE_URL}gnolichka_emoji/${name}.png`
         return (
-          <img 
-            key={i} 
-            src={src} 
-            alt={part} 
+          <img
+            key={i}
+            src={src}
+            alt={part}
             title={name}
-            className="inline-block w-6 h-6 mx-0.5 align-middle object-contain" 
+            className={`inline-block ${sizeClass} mx-0.5 align-middle object-contain`}
           />
         )
       }

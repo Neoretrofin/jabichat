@@ -11,6 +11,7 @@ import CreateGroupModal from '../components/CreateGroupModal'
 import ConfirmModal from '../components/ConfirmModal'
 import Avatar from '../components/Avatar'
 import { contactDisplayName } from '../types/chat'
+import { renderMessageContent } from '../lib/customEmojis'
 
 type ListItem =
   | { kind: 'dm'; pubkey: string; name: string; picture?: string; lastContent?: string; lastAt: number; unread: number }
@@ -122,7 +123,7 @@ export default function ChatsPage() {
                     <p className="text-lily-green font-medium text-sm truncate">{item.name}</p>
                   </div>
                   {item.lastContent ? (
-                    <p className="text-lily-green/50 text-xs truncate mt-0.5">{item.lastContent}</p>
+                    <p className="text-lily-green/50 text-xs truncate mt-0.5">{renderMessageContent(item.lastContent, { compact: true })}</p>
                   ) : (
                     <p className="text-lily-green/30 text-xs mt-0.5 flex items-center gap-1">
                       <MessageCircle size={11} /> Начни разговор

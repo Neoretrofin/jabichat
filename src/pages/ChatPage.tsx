@@ -120,6 +120,7 @@ export default function ChatPage() {
   const [showEmoji, setShowEmoji] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const emojiBtnRef = useRef<HTMLButtonElement>(null)
 
   const myPubkey = useMemo(() => (npub ? npubToHex(npub) : null), [npub])
   const myDisplayName = profileName || 'Вы'
@@ -306,9 +307,11 @@ export default function ChatPage() {
               inputRef.current?.focus()
             }}
             onClose={() => setShowEmoji(false)}
+            excludeRef={emojiBtnRef}
           />
         )}
         <button
+          ref={emojiBtnRef}
           onClick={() => setShowEmoji((v) => !v)}
           className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
             showEmoji
