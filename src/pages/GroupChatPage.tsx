@@ -9,6 +9,7 @@ import { useChannelSubscription } from '../hooks/useChannelSubscription'
 import Avatar from '../components/Avatar'
 import MessageContextMenu from '../components/MessageContextMenu'
 import EmojiPicker from '../components/EmojiPicker'
+import { renderMessageContent } from '../lib/customEmojis'
 import type { GroupMessage } from '../types/group'
 import { contactDisplayName, type Contact } from '../types/chat'
 
@@ -96,7 +97,7 @@ function GroupMessageBubble({
               <p className={`text-xs break-words [overflow-wrap:anywhere] line-clamp-2 ${
                 mine ? 'text-swamp-darker/60' : 'text-lily-green/70'
               }`}>
-                {snippetOf(replyTarget.content)}
+                {renderMessageContent(snippetOf(replyTarget.content))}
               </p>
             </div>
           ) : (
@@ -108,7 +109,7 @@ function GroupMessageBubble({
           )
         )}
 
-        <p className="leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{msg.content}</p>
+        <p className="leading-relaxed break-words [overflow-wrap:anywhere] whitespace-pre-wrap">{renderMessageContent(msg.content)}</p>
         <p className={`text-xs mt-1 ${mine ? 'text-swamp-darker/60' : 'text-lily-green/40'} text-right`}>
           {formatTime(msg.createdAt)}
         </p>
@@ -284,7 +285,7 @@ export default function GroupChatPage() {
             <Reply size={14} className="text-frog-skin shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-frog-skin text-xs font-medium truncate">{replyAuthorLabel}</p>
-              <p className="text-lily-green/60 text-xs truncate">{snippetOf(replyTo.content, 100)}</p>
+              <p className="text-lily-green/60 text-xs truncate">{renderMessageContent(snippetOf(replyTo.content, 100))}</p>
             </div>
             <button
               onClick={() => setReplyTo(null)}

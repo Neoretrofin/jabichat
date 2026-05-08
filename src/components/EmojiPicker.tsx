@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 
+import { GNOLICHKA_EMOJIS_SHORTCODES } from '../lib/customEmojis'
+
 // Curated emoji set grouped by category. These are plain Unicode —
 // they travel as regular text inside the Nostr message `content` field,
 // so the decentralised architecture stays 100 % intact.
@@ -45,6 +47,7 @@ const EMOJI_CATEGORIES: Record<string, string[]> = {
     '🍰','🎂','🧁','🍩','🍪','🍫','🍬','🍭','🍿','☕',
     '🍵','🧃','🥤','🍺','🍻','🥂','🍷','🍹','🧊',
   ],
+  '🧌 Гнолички': GNOLICHKA_EMOJIS_SHORTCODES,
 }
 
 const CATEGORIES = Object.keys(EMOJI_CATEGORIES)
@@ -66,6 +69,15 @@ interface EmojiPickerProps {
   /** Insert emoji at cursor / append to input value. */
   onSelect: (emoji: string) => void
   onClose: () => void
+}
+
+function renderEmojiItem(emoji: string) {
+  if (emoji.startsWith(':') && emoji.endsWith(':')) {
+    const name = emoji.slice(1, -1)
+    const src = `${import.meta.env.BASE_URL}gnolichka_emoji/${name}.png`
+    return <img src={src} alt={emoji} title={name} className="w-7 h-7 object-contain pointer-events-none" />
+  }
+  return emoji
 }
 
 export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
@@ -174,7 +186,7 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
                   onClick={() => handlePick(emoji)}
                   className="w-10 h-10 flex items-center justify-center text-xl rounded-lg hover:bg-frog-skin/15 transition-colors active:scale-90"
                 >
-                  {emoji}
+                  {renderEmojiItem(emoji)}
                 </button>
               ))}
             </div>
@@ -190,7 +202,7 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
                 onClick={() => handlePick(emoji)}
                 className="w-10 h-10 flex items-center justify-center text-xl rounded-lg hover:bg-frog-skin/15 transition-colors active:scale-90"
               >
-                {emoji}
+                {renderEmojiItem(emoji)}
               </button>
             ))}
           </div>
