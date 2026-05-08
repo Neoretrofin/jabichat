@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Phone, Reply } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Phone, Reply, Smile } from 'lucide-react'
 import { useNostrStore } from '../store/nostrStore'
 import { useChatStore } from '../store/chatStore'
 import { useCallStore } from '../store/callStore'
 import { buildDMRumor, publishDM, npubToHex } from '../lib/dm'
 import Avatar from '../components/Avatar'
 import MessageContextMenu from '../components/MessageContextMenu'
+import EmojiPicker from '../components/EmojiPicker'
 import { contactDisplayName, type Message, type Contact } from '../types/chat'
 
 function formatTime(ts: number) {
@@ -115,6 +116,7 @@ export default function ChatPage() {
   const [nameInput, setNameInput] = useState('')
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [menuTarget, setMenuTarget] = useState<{ msg: Message; x: number; y: number } | null>(null)
+  const [showEmoji, setShowEmoji] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -295,7 +297,27 @@ export default function ChatPage() {
         </div>
       )}
 
-      <div className="px-4 py-3 border-t border-frog-dark/20 bg-swamp-dark flex items-end gap-2">
+      <div className="relative px-4 py-3 border-t border-frog-dark/20 bg-swamp-dark flex items-end gap-2">
+        {showEmoji && (
+          <EmojiPicker
+            onSelect={(emoji) => {
+              setText((prev) => prev + emoji)
+              inputRef.current?.focus()
+            }}
+            onClose={() => setShowEmoji(false)}
+          />
+        )}
+        <button
+          onClick={() => setShowEmoji((v) => !v)}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+            showEmoji
+              ? 'bg-frog-skin text-swamp-darker'
+              : 'bg-swamp-darker border border-frog-dark/30 text-lily-green/50 hover:text-frog-skin hover:border-frog-skin'
+          }`}
+          title="Эмодзи"
+        >
+          <Smile size={18} />
+        </button>
         <textarea
           ref={inputRef}
           value={text}

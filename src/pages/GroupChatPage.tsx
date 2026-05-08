@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Copy, CheckCheck, Reply, X } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Copy, CheckCheck, Reply, X, Smile } from 'lucide-react'
 import { useNostrStore } from '../store/nostrStore'
 import { useGroupStore } from '../store/groupStore'
 import { useChatStore } from '../store/chatStore'
@@ -8,6 +8,7 @@ import { sendChannelMessage } from '../lib/channel'
 import { useChannelSubscription } from '../hooks/useChannelSubscription'
 import Avatar from '../components/Avatar'
 import MessageContextMenu from '../components/MessageContextMenu'
+import EmojiPicker from '../components/EmojiPicker'
 import type { GroupMessage } from '../types/group'
 import { contactDisplayName, type Contact } from '../types/chat'
 
@@ -130,6 +131,7 @@ export default function GroupChatPage() {
   const [myPubkey, setMyPubkey] = useState<string | null>(null)
   const [replyTo, setReplyTo] = useState<GroupMessage | null>(null)
   const [menuTarget, setMenuTarget] = useState<{ msg: GroupMessage; x: number; y: number } | null>(null)
+  const [showEmoji, setShowEmoji] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -295,7 +297,27 @@ export default function GroupChatPage() {
         </div>
       )}
 
-      <div className="px-4 py-3 border-t border-frog-dark/20 bg-swamp-dark flex items-end gap-2">
+      <div className="relative px-4 py-3 border-t border-frog-dark/20 bg-swamp-dark flex items-end gap-2">
+        {showEmoji && (
+          <EmojiPicker
+            onSelect={(emoji) => {
+              setText((prev) => prev + emoji)
+              inputRef.current?.focus()
+            }}
+            onClose={() => setShowEmoji(false)}
+          />
+        )}
+        <button
+          onClick={() => setShowEmoji((v) => !v)}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+            showEmoji
+              ? 'bg-frog-skin text-swamp-darker'
+              : 'bg-swamp-darker border border-frog-dark/30 text-lily-green/50 hover:text-frog-skin hover:border-frog-skin'
+          }`}
+          title="Эмодзи"
+        >
+          <Smile size={18} />
+        </button>
         <textarea
           ref={inputRef}
           value={text}
