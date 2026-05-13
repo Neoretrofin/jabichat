@@ -42,13 +42,25 @@ HTTPS в dev обязателен: `getUserMedia`, `crypto.subtle`, `navigator.c
 ## Архитектура: главные узлы
 
 ### Звонок (WebRTC)
-- `src/lib/webrtc.ts` — **синглтон-модуль** с module-level state (`_pc`, `_audioSender`, `_videoSender`, `_micStream`, `_camStream`, `_screenStream`, `_audioMixContext`, `_pendingCandidates`, `_remoteDescReady`). Один активный `RTCPeerConnection` на приложение. `cleanup()` обнуляет всё. Не превращай в класс/контекст — звонок должен переживать перерендеры/навигацию.
+- `src/lib/webrtc.ts` — **синглтон-модуль** с module-level state (`_pc`, `_audioSender`, `_videoSender`, `_micStream`, `_camStream`, `_screenStream`, `_audioMixContext`, `_voiceGainNode`, `_screenGainNode`, `_dataChannel`, `_onMediaControl`, `_pendingCandidates`, `_remoteDescReady`). Один активный `RTCPeerConnection` на приложение. `cleanup()` обнуляет всё. Не превращай в класс/контекст — звонок должен переживать перерендеры/навигацию.
 - Базовый layout: **один audio-transceiver + один video-transceiver**, выделяются у offerer'а в `createPeerConnection('offerer')`. Answerer получает их из remote SDP и `refreshSenders()` находит их по позиции.
 - Камера и экран делят `_videoSender` через `replaceTrack()` — нет нового m-line, нет ренегациации.
-- **Звук экрана**: всегда микшируется в микрофон через Web Audio API (`mixScreenAudioIntoMic`) — единственный audio m-line, никаких ренегациаций. Раньше для desktop↔desktop пробовали второй transceiver, но Android Chrome на >1 audio m-line молча терял media; теперь миксуем безусловно.
+- **Звук экрана**: всегда микшируется в микрофон через Web Audio API (`mixScreenAudioIntoMic`) — единственный audio m-line, никаких ренегациаций. Раньше для desktop↔desktop пробовали второй transceiver, но Android Chrome на >1 audio m-line молча терял media; теперь миксуем безусловно. **Никогда не возвращайся к двум audio m-line ради независимых ползунков — для этого есть Remote Volume Control через DataChannel (см. ниже).**
+- **Mix-пайплайн с GainNode'ами:** `[mic] → [_voiceGainNode] → [destination]` и `[screen] → [_screenGainNode] → [destination]`. Поднимается лениво только когда стартует screen share с аудио, рушится в `stopScreenShare()`. Без screen share — `_audioSender` несёт сырой mic-track напрямую, без Web Audio (без лишней latency / контекста). Гейны клампятся в `[0, 2]` (можно усилить вдвое).
 - **ICE-кандидаты буферизуются до готовности pc + remote desc.** `_pendingCandidates` НЕ сбрасывается в `createPeerConnection` (только в `cleanup()`) — критично для phone→PC, где трикл-ICE прилетает пока answerer ещё в `ringing` и пока юзер не нажал «Принять». Если сбросить буфер — ICE зависает на `checking`.
 - **TURN обязателен.** `ICE_SERVERS` хардкодом включает `openrelay.metered.ca` (UDP/TCP/TLS варианты) поверх Google STUN. Только STUN не пробивает CGNAT мобильных операторов. Не выкидывай без замены.
-- Удалённые треки классифицируются в `pc.ontrack` через `classifyAudio()`: первый audio = `voice`, второй = `screen-audio`. Видео всегда `video`. Колбэк `onRemoteTrack(kind, stream, track)` идёт в `useCallController`, оттуда в `callStore`.
+- Удалённые треки классифицируются в `pc.ontrack`: audio = `voice`, video = `video`. Только один audio-track из-за миксования на стороне sender'а. Колбэк `onRemoteTrack(kind, stream, track)` идёт в `useCallController`, оттуда в `callStore`.
+
+### Remote Volume Control (DataChannel)
+- **Зачем:** receiver хочет балансировать голос собеседника vs звук фильма при screen share. Делать через 2 audio-трека нельзя (см. правило выше). Решение: receiver двигает ползунок → команда летит по DataChannel → sender применяет gain на своей стороне до отправки звука.
+- **DataChannel `media-control`:** создаётся offerer'ом сразу в `createPeerConnection('offerer')` **до** `createOffer()` (чтобы попасть в SDP без renegotiation). Answerer ловит его через `pc.ondatachannel`. `ordered: true`, без `maxRetransmits` (надёжный TCP-стиль). На `cleanup()` закрывается.
+- **Протокол:** JSON-сообщения типа `MediaControlMsg`:
+  - `{ type: 'hello', features: string[] }` — handshake; шлётся обеими сторонами в `dc.onopen`. Receiver узнаёт о поддержке через `features.includes('remote-volume')` → `callStore.peerSupportsMediaControl`. Старые клиенты не пришлют hello → ползунки не показываются.
+  - `{ type: 'screen-audio', active: boolean }` — sender шлёт автоматически в `startScreenShare` (`active = withSystemAudio`) и `stopScreenShare` (`active = false`). Receiver хранит в `callStore.peerScreenAudioActive`; ползунки voice/screen появляются только при `true`.
+  - `{ type: 'set-voice-gain' | 'set-screen-gain', value: number }` — receiver шлёт sender'у. На стороне sender'а `attachDataChannel.onmessage` сразу применяет к `_voiceGainNode`/`_screenGainNode` локально; UI-сторону опционально обновляет `_onMediaControl` колбэк.
+- **API:** `sendMediaControl(msg)` (no-op если канал не open), `setMediaControlHandler(handler)` — регистрация колбэка в `useCallController` для проброса в `callStore`.
+- **Throttle в UI:** `CallPage` дросселит исходящие `set-*-gain` до ~60ms с trailing-send последнего значения. Локальный стор обновляется на каждом `onChange` (responsive UI), сеть ограничена.
+- **Дефолты и ресет:** все гейны стартуют с 1.0. На `stopScreenShare` (или приходе `screen-audio: false`) receiver сбрасывает `peerScreenGain → 1`, чтобы при следующем шаринге ползунок был в нейтрали. Полный сброс — в `callStore.reset()` через `initial`.
 
 ### Сигналинг
 - `src/lib/signaling.ts`: `sendSignal()` пакует `SignalPayload` в NDKEvent kind 25050, оборачивает gift-wrap'ом kind 1059 и публикует. `decryptSignal()` — обратная операция; ошибки расшифровки игнорируются (это gift-wrap'ы для других подписчиков, не для нас — нормальный шум).
@@ -79,7 +91,7 @@ HTTPS в dev обязателен: `getUserMedia`, `crypto.subtle`, `navigator.c
 - `groupStore` — NIP-28 группы + **deletedAt**. Persist key: `jabichat-groups`.
 - `deviceStore` — выбранные input/output devices, noise-suppression toggle. Persist key: `jabichat-devices`.
 - `themeStore` — `'jabi' | 'dark' | 'light'`. Persist key: `jabichat-theme`.
-- `callStore` — звонок: status (`idle | calling | ringing | accepting | connected | ended`), peerPubkey, callId, **`role`**, **`peerIsMobile`**, локальные/удалённые стримы, `connectedAt` (стампится единожды на первом переходе в `connected` — таймер должен переживать перерендер CallPage), volume sliders. **Не персистится.**
+- `callStore` — звонок: status (`idle | calling | ringing | accepting | connected | ended`), peerPubkey, callId, **`role`**, локальные/удалённые стримы, `connectedAt` (стампится единожды на первом переходе в `connected` — таймер должен переживать перерендер CallPage), `voiceVolume` (локальный мастер для `<audio>.volume`), Remote Volume Control: `peerVoiceGain`/`peerScreenGain` (то, что я попросил у пира; 0-2), `peerScreenAudioActive` (пир сейчас шарит экран с аудио), `peerSupportsMediaControl` (получил ли hello). **Не персистится.**
 
 ### Роутинг
 - **HashRouter** (в `App.tsx` импортируется как `BrowserRouter as` alias). Нужен для GitHub Pages: один `index.html`, всё остальное — фрагмент `#/...`. Не меняй на BrowserRouter без серверной rewrite-логики.

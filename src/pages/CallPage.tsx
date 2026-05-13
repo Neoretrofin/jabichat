@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   PhoneOff, Mic, MicOff, Video, VideoOff,
-  ScreenShare, ScreenShareOff, Settings, Volume2, Maximize2, Wand2,
+  ScreenShare, ScreenShareOff, Settings, Volume2, Maximize2,
+  MessageSquare, MonitorPlay,
 } from 'lucide-react'
 import { useCallStore } from '../store/callStore'
 import { useChatStore } from '../store/chatStore'
@@ -15,8 +16,8 @@ import {
   disableCamera,
   setAudioInputDevice,
   setVideoInputDevice,
-  setNoiseSuppression,
   supportsAudioOutputSelection,
+  sendMediaControl,
 } from '../lib/webrtc'
 import { startOutgoingRing, stopOutgoingRing } from '../lib/sound'
 import Avatar from '../components/Avatar'
@@ -44,6 +45,10 @@ export default function CallPage() {
   const micEnabled = useCallStore((s) => s.micEnabled)
   const camEnabled = useCallStore((s) => s.camEnabled)
   const voiceVolume = useCallStore((s) => s.voiceVolume)
+  const peerVoiceGain = useCallStore((s) => s.peerVoiceGain)
+  const peerScreenGain = useCallStore((s) => s.peerScreenGain)
+  const peerScreenAudioActive = useCallStore((s) => s.peerScreenAudioActive)
+  const peerSupportsMediaControl = useCallStore((s) => s.peerSupportsMediaControl)
   const connectedAt = useCallStore((s) => s.connectedAt)
   const error = useCallStore((s) => s.error)
   const setMicEnabled = useCallStore((s) => s.setMicEnabled)
@@ -52,6 +57,8 @@ export default function CallPage() {
   const setScreenStream = useCallStore((s) => s.setScreenStream)
   const setShareHasAudio = useCallStore((s) => s.setShareHasAudio)
   const setVoiceVolume = useCallStore((s) => s.setVoiceVolume)
+  const setPeerVoiceGain = useCallStore((s) => s.setPeerVoiceGain)
+  const setPeerScreenGain = useCallStore((s) => s.setPeerScreenGain)
   const setRemoteVideoActive = useCallStore((s) => s.setRemoteVideoActive)
 
   const { contacts } = useChatStore()
@@ -69,6 +76,35 @@ export default function CallPage() {
   const [remoteAudioEl, setRemoteAudioEl] = useState<HTMLAudioElement | null>(null)
   const [localVideoEl, setLocalVideoEl] = useState<HTMLVideoElement | null>(null)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
+
+  // Trailing throttle for DataChannel gain commands. Slider drag fires
+  // onChange dozens of times per second; we keep store updates instant for
+  // a responsive slider, but rate-limit network sends to ~60ms — plenty
+  // smooth for a Web Audio gain ramp, and avoids hammering the channel on
+  // shaky links.
+  const lastSendRef = useRef<{ voice: number; screen: number }>({ voice: 0, screen: 0 })
+  const trailingRef = useRef<{ voice?: number; screen?: number }>({})
+  const sendGainThrottled = (kind: 'voice' | 'screen', value: number) => {
+    const type = kind === 'voice' ? 'set-voice-gain' : 'set-screen-gain'
+    const now = Date.now()
+    const elapsed = now - lastSendRef.current[kind]
+    const THROTTLE_MS = 60
+    if (elapsed >= THROTTLE_MS) {
+      lastSendRef.current[kind] = now
+      sendMediaControl({ type, value })
+    } else if (trailingRef.current[kind] === undefined) {
+      trailingRef.current[kind] = window.setTimeout(() => {
+        lastSendRef.current[kind] = Date.now()
+        trailingRef.current[kind] = undefined
+        // Use latest store value, not the value captured at schedule time —
+        // we want the FINAL position, not whatever was racing through 60ms ago.
+        const v = kind === 'voice'
+          ? useCallStore.getState().peerVoiceGain
+          : useCallStore.getState().peerScreenGain
+        sendMediaControl({ type, value: v })
+      }, THROTTLE_MS - elapsed)
+    }
+  }
 
   const effectivePubkey = peerPubkey ?? urlPubkey ?? null
   const sharing = screenStream !== null
@@ -200,15 +236,9 @@ export default function CallPage() {
     }
   }
 
-  const toggleNoiseSuppression = async () => {
-    const next = !devicePrefs.noiseSuppression
-    devicePrefs.setNoiseSuppression(next)
-    try { await setNoiseSuppression(next) } catch (e) { console.warn(e) }
-  }
-
   const handleAudioInput = async (id: string) => {
     devicePrefs.setAudioInput(id)
-    try { await setAudioInputDevice(id, devicePrefs.noiseSuppression) } catch (e) { console.warn(e) }
+    try { await setAudioInputDevice(id) } catch (e) { console.warn(e) }
   }
 
   const handleVideoInput = async (id: string) => {
@@ -308,18 +338,68 @@ export default function CallPage() {
       )}
 
       {remoteAudio && (
-        <div className="absolute bottom-24 left-4 flex items-center gap-2 w-44 bg-swamp-darker/80 backdrop-blur border border-frog-dark/30 rounded-2xl px-3 py-2 z-10">
-          <Volume2 size={14} className="text-lily-green/60 shrink-0" />
-          <span className="text-lily-green/60 text-[10px] uppercase tracking-wider w-12">Звук</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={voiceVolume}
-            onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
-            className="flex-1 accent-frog-skin"
-          />
+        <div className="absolute bottom-24 left-4 flex flex-col gap-1.5 w-52 bg-swamp-darker/80 backdrop-blur border border-frog-dark/30 rounded-2xl px-3 py-2 z-10">
+          {/* Master volume — local <audio>.volume. Always shown. */}
+          <div className="flex items-center gap-2">
+            <Volume2 size={14} className="text-lily-green/60 shrink-0" />
+            <span className="text-lily-green/60 text-[10px] uppercase tracking-wider w-14">Звук</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={voiceVolume}
+              onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
+              className="flex-1 accent-frog-skin"
+            />
+          </div>
+
+          {/* Remote-controlled gains live on the SENDER end and only become
+              relevant when the peer shares a screen WITH audio (so there are
+              two sources to balance). Hidden when their share is voice-only
+              or when peer is on a build that doesn't support media-control. */}
+          {peerSupportsMediaControl && peerScreenAudioActive && (
+            <>
+              <div className="flex items-center gap-2">
+                <MessageSquare size={14} className="text-frog-skin shrink-0" />
+                <span className="text-frog-skin/80 text-[10px] uppercase tracking-wider w-14" title="Громкость голоса собеседника на его стороне">
+                  Голос
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={peerVoiceGain}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    setPeerVoiceGain(v)
+                    sendGainThrottled('voice', v)
+                  }}
+                  className="flex-1 accent-frog-skin"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <MonitorPlay size={14} className="text-frog-skin shrink-0" />
+                <span className="text-frog-skin/80 text-[10px] uppercase tracking-wider w-14" title="Громкость звука с экрана собеседника">
+                  Экран
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={peerScreenGain}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    setPeerScreenGain(v)
+                    sendGainThrottled('screen', v)
+                  }}
+                  className="flex-1 accent-frog-skin"
+                />
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -348,19 +428,6 @@ export default function CallPage() {
               </option>
             ))}
           </select>
-
-          <label className="flex items-center justify-between gap-2 mb-3 cursor-pointer">
-            <span className="flex items-center gap-1.5 text-lily-green text-sm">
-              <Wand2 size={14} className="text-frog-skin" />
-              Шумоподавление
-            </span>
-            <input
-              type="checkbox"
-              checked={devicePrefs.noiseSuppression}
-              onChange={toggleNoiseSuppression}
-              className="accent-frog-skin w-4 h-4"
-            />
-          </label>
 
           <p className="text-lily-green/50 text-xs uppercase tracking-wider mb-1.5">Камера</p>
           <select

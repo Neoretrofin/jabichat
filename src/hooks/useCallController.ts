@@ -8,7 +8,9 @@ import {
   applyRemoteDescription,
   createPeerConnection,
   cleanup,
+  setMediaControlHandler,
   type RemoteTrackKind,
+  type MediaControlMsg,
 } from '../lib/webrtc'
 import { useHangup } from './useHangup'
 
@@ -21,7 +23,6 @@ export function useCallController() {
   const peerPubkey = useCallStore((s) => s.peerPubkey)
   const pendingOffer = useCallStore((s) => s.pendingOffer)
   const audioInputId = useDeviceStore((s) => s.audioInputId)
-  const noiseSuppression = useDeviceStore((s) => s.noiseSuppression)
   const hangup = useHangup()
 
   const setupKey = useRef<string | null>(null)
@@ -31,6 +32,30 @@ export function useCallController() {
       setupKey.current = null
     }
   }, [status])
+
+  // Bridge DataChannel media-control messages into callStore. Registered
+  // once for the lifetime of the controller (mounted in Layout for the whole
+  // app) — must NOT live inside the call-setup effect, because that effect
+  // re-runs whenever any of its deps change. The handler captures a closure;
+  // a cleanup that sets cancelled=true on an old closure combined with the
+  // setupKey early-return would leave a permanently dead handler installed.
+  useEffect(() => {
+    setMediaControlHandler((msg: MediaControlMsg) => {
+      const cs = useCallStore.getState()
+      if (msg.type === 'hello') {
+        cs.setPeerSupportsMediaControl(msg.features.includes('remote-volume'))
+      } else if (msg.type === 'screen-audio') {
+        cs.setPeerScreenAudioActive(msg.active)
+        // When the peer stops their screen share, our cached gain for it
+        // becomes stale — reset so the slider returns to neutral if/when
+        // they share again.
+        if (!msg.active) cs.setPeerScreenGain(1)
+      }
+      // set-*-gain messages are for the SENDER end (their own gain) and are
+      // applied directly inside webrtc.ts. Nothing to do here.
+    })
+    return () => setMediaControlHandler(null)
+  }, [])
 
   useEffect(() => {
     if (!ndk || !callId || !peerPubkey) return
@@ -83,10 +108,7 @@ export function useCallController() {
           await applyRemoteDescription(pendingOffer)
         }
 
-        const micStream = await acquireMic({
-          deviceId: audioInputId,
-          noiseSuppression,
-        })
+        const micStream = await acquireMic({ deviceId: audioInputId })
         if (cancelled) return
         useCallStore.getState().setMicStream(micStream)
 
@@ -126,7 +148,7 @@ export function useCallController() {
     return () => {
       cancelled = true
     }
-  }, [ndk, callId, status, peerPubkey, pendingOffer, audioInputId, noiseSuppression])
+  }, [ndk, callId, status, peerPubkey, pendingOffer, audioInputId])
 
   useEffect(() => {
     if (status !== 'calling') return

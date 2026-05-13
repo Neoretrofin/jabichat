@@ -23,7 +23,23 @@ interface CallStore {
   micEnabled: boolean
   camEnabled: boolean
 
+  // Local master volume — controls <audio>.volume in CallPage, no network
+  // involvement.
   voiceVolume: number
+
+  // Remote Volume Control: my-side cached values for the sender-side gain
+  // nodes living on the peer. UI-only here; actual gain is applied on the
+  // peer's machine when our DataChannel message arrives. Both default to 1
+  // (unity). See webrtc.ts for the pipeline that consumes these on the peer.
+  peerVoiceGain: number
+  peerScreenGain: number
+  // Did the peer's screen-audio handshake arrive? Toggled by the peer when
+  // they start/stop sharing a screen WITH audio. Drives slider visibility.
+  peerScreenAudioActive: boolean
+  // Did the peer announce media-control support via the hello handshake?
+  // false until their hello arrives; if it never does (old client), sliders
+  // stay hidden / show "feature unavailable".
+  peerSupportsMediaControl: boolean
 
   // ms timestamp of when the connection first reached 'connected'. Used by
   // the duration timer so it survives CallPage unmount/remount.
@@ -46,6 +62,10 @@ interface CallStore {
   setMicEnabled: (v: boolean) => void
   setCamEnabled: (v: boolean) => void
   setVoiceVolume: (v: number) => void
+  setPeerVoiceGain: (v: number) => void
+  setPeerScreenGain: (v: number) => void
+  setPeerScreenAudioActive: (v: boolean) => void
+  setPeerSupportsMediaControl: (v: boolean) => void
   setError: (msg: string | null) => void
 
   reset: () => void
@@ -67,8 +87,19 @@ const initial = {
   micEnabled: true,
   camEnabled: false,
   voiceVolume: 1,
+  peerVoiceGain: 1,
+  peerScreenGain: 1,
+  peerScreenAudioActive: false,
+  peerSupportsMediaControl: false,
   connectedAt: null,
   error: null,
+}
+
+function clampGain(v: number): number {
+  if (!Number.isFinite(v)) return 1
+  if (v < 0) return 0
+  if (v > 2) return 2
+  return v
 }
 
 export const useCallStore = create<CallStore>()((set) => ({
@@ -108,6 +139,10 @@ export const useCallStore = create<CallStore>()((set) => ({
   setMicEnabled: (v) => set({ micEnabled: v }),
   setCamEnabled: (v) => set({ camEnabled: v }),
   setVoiceVolume: (v) => set({ voiceVolume: Math.max(0, Math.min(1, v)) }),
+  setPeerVoiceGain: (v) => set({ peerVoiceGain: clampGain(v) }),
+  setPeerScreenGain: (v) => set({ peerScreenGain: clampGain(v) }),
+  setPeerScreenAudioActive: (v) => set({ peerScreenAudioActive: v }),
+  setPeerSupportsMediaControl: (v) => set({ peerSupportsMediaControl: v }),
   setError: (msg) => set({ error: msg }),
 
   reset: () => set(initial),

@@ -29,7 +29,25 @@ let _videoSender: RTCRtpSender | null = null
 let _micStream: MediaStream | null = null
 let _camStream: MediaStream | null = null
 let _screenStream: MediaStream | null = null
+
+// Mix pipeline:  [mic] → [voiceGain] ─┐
+//                                      ├→ [destination] → audio sender
+//                [sys] → [screenGain] ─┘
+// Built lazily when the local user starts a screen share (with audio); torn
+// down when the share ends. Outside screen share, the raw mic track is sent
+// directly — no Web Audio overhead. Voice/screen gains are therefore only
+// adjustable while screen share is active, which matches the movie-watching
+// use case the feature was designed for.
 let _audioMixContext: AudioContext | null = null
+let _voiceGainNode: GainNode | null = null
+let _screenGainNode: GainNode | null = null
+
+// DataChannel "media-control" carries Remote Volume Control commands and the
+// screen-audio-active signal. Created by the offerer alongside the offer so
+// the answerer receives it from the very first SDP — no renegotiation. Lives
+// for the duration of the call; new call → new channel.
+let _dataChannel: RTCDataChannel | null = null
+let _onMediaControl: OnMediaControl | null = null
 
 let _pendingCandidates: RTCIceCandidateInit[] = []
 let _remoteDescReady = false
@@ -39,17 +57,31 @@ export type OnIceCandidate = (candidate: RTCIceCandidateInit) => void
 export type OnRemoteTrack = (kind: RemoteTrackKind, stream: MediaStream, track: MediaStreamTrack) => void
 export type OnConnectionState = (state: RTCPeerConnectionState) => void
 
+export type MediaControlMsg =
+  | { type: 'hello'; features: string[] }
+  | { type: 'screen-audio'; active: boolean }
+  | { type: 'set-voice-gain'; value: number }
+  | { type: 'set-screen-gain'; value: number }
+
+export type OnMediaControl = (msg: MediaControlMsg) => void
+
+const MEDIA_CONTROL_FEATURES = ['remote-volume', 'screen-audio-signal']
+
 interface AudioConstraints extends MediaTrackConstraints {
   noiseSuppression?: ConstrainBoolean
   echoCancellation?: ConstrainBoolean
   autoGainControl?: ConstrainBoolean
 }
 
-function buildAudioConstraints(deviceId: string | null | undefined, noiseSuppression: boolean): AudioConstraints {
+// Echo cancellation is non-optional — without it the caller hears themselves
+// looped through the receiver's speakers. Noise suppression and AGC ride on
+// top because browser implementations bundle them; toggling them off does
+// nothing useful in practice and confuses users.
+function buildAudioConstraints(deviceId: string | null | undefined): AudioConstraints {
   const c: AudioConstraints = {
-    echoCancellation: noiseSuppression,
-    noiseSuppression: noiseSuppression,
-    autoGainControl: noiseSuppression,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
   }
   if (deviceId) c.deviceId = { exact: deviceId }
   return c
@@ -57,6 +89,70 @@ function buildAudioConstraints(deviceId: string | null | undefined, noiseSuppres
 
 function isAudioTransceiver(t: RTCRtpTransceiver): boolean {
   return t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
+}
+
+export function setMediaControlHandler(handler: OnMediaControl | null): void {
+  _onMediaControl = handler
+}
+
+function parseMediaControlMsg(data: unknown): MediaControlMsg | null {
+  if (typeof data !== 'string') return null
+  try {
+    return JSON.parse(data) as MediaControlMsg
+  } catch {
+    return null
+  }
+}
+
+function attachDataChannel(dc: RTCDataChannel): void {
+  _dataChannel = dc
+  dc.onopen = () => {
+    try {
+      const hello: MediaControlMsg = { type: 'hello', features: MEDIA_CONTROL_FEATURES }
+      dc.send(JSON.stringify(hello))
+    } catch (e) {
+      console.warn('[webrtc] datachannel hello failed:', e)
+    }
+  }
+  dc.onmessage = (e) => {
+    const msg = parseMediaControlMsg(e.data)
+    if (!msg) return
+    // Apply gain locally if it's for us (we are the sender being told to
+    // adjust). Then notify the controller for UI/store side effects.
+    if (msg.type === 'set-voice-gain') {
+      applyLocalVoiceGain(msg.value)
+    } else if (msg.type === 'set-screen-gain') {
+      applyLocalScreenGain(msg.value)
+    }
+    _onMediaControl?.(msg)
+  }
+  dc.onerror = (e) => console.warn('[webrtc] datachannel error:', e)
+  dc.onclose = () => { /* expected on hangup */ }
+}
+
+export function sendMediaControl(msg: MediaControlMsg): void {
+  const dc = _dataChannel
+  if (!dc || dc.readyState !== 'open') return
+  try {
+    dc.send(JSON.stringify(msg))
+  } catch (e) {
+    console.warn('[webrtc] sendMediaControl failed:', e)
+  }
+}
+
+function clampGain(v: number): number {
+  if (!Number.isFinite(v)) return 1
+  if (v < 0) return 0
+  if (v > 2) return 2
+  return v
+}
+
+function applyLocalVoiceGain(value: number): void {
+  if (_voiceGainNode) _voiceGainNode.gain.value = clampGain(value)
+}
+
+function applyLocalScreenGain(value: number): void {
+  if (_screenGainNode) _screenGainNode.gain.value = clampGain(value)
 }
 
 export function createPeerConnection(
@@ -70,6 +166,7 @@ export function createPeerConnection(
   }
   _audioSender = null
   _videoSender = null
+  _dataChannel = null
   // Keep _pendingCandidates intact: when answering, ICE candidates from the
   // peer may have arrived while we were still in 'ringing' (no pc yet).
   // Dropping them here was the cause of phone→PC calls hanging on 'checking'.
@@ -109,6 +206,16 @@ export function createPeerConnection(
     pc.addTransceiver('audio', { direction: 'sendrecv' })
     pc.addTransceiver('video', { direction: 'sendrecv' })
     refreshSenders(pc)
+    // Create the media-control DataChannel BEFORE createOffer so the channel
+    // appears in the SDP and the answerer receives it via ondatachannel.
+    const dc = pc.createDataChannel('media-control', { ordered: true })
+    attachDataChannel(dc)
+  } else {
+    pc.ondatachannel = (event) => {
+      if (event.channel.label === 'media-control') {
+        attachDataChannel(event.channel)
+      }
+    }
   }
 
   return pc
@@ -130,10 +237,9 @@ function refreshSenders(pc: RTCPeerConnection): void {
 
 export async function acquireMic(opts: {
   deviceId?: string | null
-  noiseSuppression: boolean
 }): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: buildAudioConstraints(opts.deviceId, opts.noiseSuppression),
+    audio: buildAudioConstraints(opts.deviceId),
   })
   _micStream = stream
   const track = stream.getAudioTracks()[0]
@@ -207,12 +313,18 @@ export async function startScreenShare(opts: {
   // Always mix screen audio into the existing mic track. Single audio m-line
   // means no SDP renegotiation, no second-transceiver classification edge
   // cases — works the same on PC↔PC and PC↔mobile. Side effect: receiver
-  // hears voice + screen audio mixed; cannot adjust them independently.
+  // hears voice + screen audio mixed; cannot adjust them independently from
+  // their side without our Remote Volume Control DataChannel protocol.
   let withSystemAudio = false
   if (screenAudio) {
     await mixScreenAudioIntoMic(screenAudio)
     withSystemAudio = !!_audioMixContext
   }
+
+  // Tell the peer whether this share carries audio so they can show/hide
+  // the screen-audio volume slider. We send even when no audio (active:false)
+  // so the receiver clears any stale state.
+  sendMediaControl({ type: 'screen-audio', active: withSystemAudio })
 
   if (screenVideo && opts.onEnded) {
     screenVideo.addEventListener('ended', opts.onEnded)
@@ -226,13 +338,19 @@ async function mixScreenAudioIntoMic(screenAudio: MediaStreamTrack): Promise<voi
     const ctx = new AudioContext()
     const mic = ctx.createMediaStreamSource(new MediaStream(_micStream.getAudioTracks()))
     const sys = ctx.createMediaStreamSource(new MediaStream([screenAudio]))
+    const voiceGain = ctx.createGain()
+    const screenGain = ctx.createGain()
+    voiceGain.gain.value = 1
+    screenGain.gain.value = 1
     const dest = ctx.createMediaStreamDestination()
-    mic.connect(dest)
-    sys.connect(dest)
+    mic.connect(voiceGain).connect(dest)
+    sys.connect(screenGain).connect(dest)
     const mixed = dest.stream.getAudioTracks()[0]
     if (mixed) {
       await _audioSender.replaceTrack(mixed)
       _audioMixContext = ctx
+      _voiceGainNode = voiceGain
+      _screenGainNode = screenGain
     } else {
       await ctx.close().catch(() => {})
     }
@@ -262,30 +380,19 @@ export async function stopScreenShare(): Promise<void> {
   if (_audioMixContext) {
     await _audioMixContext.close().catch(() => {})
     _audioMixContext = null
+    _voiceGainNode = null
+    _screenGainNode = null
     if (_audioSender && _micStream) {
       const micTrack = _micStream.getAudioTracks()[0] ?? null
       await _audioSender.replaceTrack(micTrack)
     }
   }
+  sendMediaControl({ type: 'screen-audio', active: false })
 }
 
-export async function setNoiseSuppression(enabled: boolean): Promise<void> {
-  const track = _micStream?.getAudioTracks()[0]
-  if (!track) return
-  try {
-    await track.applyConstraints({
-      echoCancellation: enabled,
-      noiseSuppression: enabled,
-      autoGainControl: enabled,
-    } as AudioConstraints)
-  } catch (e) {
-    console.warn('[webrtc] applyConstraints (NS) failed:', e)
-  }
-}
-
-export async function setAudioInputDevice(deviceId: string, noiseSuppression: boolean): Promise<void> {
+export async function setAudioInputDevice(deviceId: string): Promise<void> {
   const newStream = await navigator.mediaDevices.getUserMedia({
-    audio: buildAudioConstraints(deviceId, noiseSuppression),
+    audio: buildAudioConstraints(deviceId),
   })
   const newTrack = newStream.getAudioTracks()[0]
   if (!newTrack) return
@@ -349,6 +456,9 @@ export function cleanup(): void {
   _camStream?.getTracks().forEach((t) => t.stop())
   _screenStream?.getTracks().forEach((t) => t.stop())
   _audioMixContext?.close().catch(() => {})
+  if (_dataChannel) {
+    try { _dataChannel.close() } catch { /* ignore */ }
+  }
   _pc?.close()
   _pc = null
   _micStream = null
@@ -357,6 +467,12 @@ export function cleanup(): void {
   _audioSender = null
   _videoSender = null
   _audioMixContext = null
+  _voiceGainNode = null
+  _screenGainNode = null
+  _dataChannel = null
+  // Intentionally NOT touching _onMediaControl — its lifecycle is owned by
+  // useCallController (mounted in Layout, lives across calls). Clearing it
+  // here would silently break the handshake on the second call.
   _pendingCandidates = []
   _remoteDescReady = false
 }
