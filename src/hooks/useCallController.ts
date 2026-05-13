@@ -8,6 +8,7 @@ import {
   applyRemoteDescription,
   createPeerConnection,
   cleanup,
+  enhanceOpusSdp,
   setMediaControlHandler,
   type RemoteTrackKind,
   type MediaControlMsg,
@@ -114,21 +115,31 @@ export function useCallController() {
 
         if (role === 'offerer') {
           const offer = await pc.createOffer()
-          await pc.setLocalDescription(offer)
+          // Patch Opus fmtp to hi-fi BEFORE setLocalDescription so the local
+          // encoder and the peer both see the same negotiated parameters.
+          const enhanced: RTCSessionDescriptionInit = {
+            type: offer.type,
+            sdp: enhanceOpusSdp(offer.sdp ?? ''),
+          }
+          await pc.setLocalDescription(enhanced)
           if (cancelled) return
           await sendSignal(ndk!, peerPubkey!, {
             type: 'call-offer',
             callId: callId!,
-            data: offer,
+            data: enhanced,
           })
         } else {
           const answer = await pc.createAnswer()
-          await pc.setLocalDescription(answer)
+          const enhanced: RTCSessionDescriptionInit = {
+            type: answer.type,
+            sdp: enhanceOpusSdp(answer.sdp ?? ''),
+          }
+          await pc.setLocalDescription(enhanced)
           if (cancelled) return
           await sendSignal(ndk!, peerPubkey!, {
             type: 'call-answer',
             callId: callId!,
-            data: answer,
+            data: enhanced,
           })
           useCallStore.getState().setStatus('connected')
         }

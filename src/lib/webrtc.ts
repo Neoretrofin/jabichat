@@ -276,8 +276,16 @@ export interface ScreenShareResult {
   withSystemAudio: boolean
 }
 
+// Default cap when caller passes no preference. 15 Mbps gives near-source
+// quality for 1080p60 screen content with strong diminishing returns above —
+// users with weak receivers are auto-throttled by Google Congestion Control.
+const DEFAULT_SCREEN_BITRATE = 15_000_000
+
 export async function startScreenShare(opts: {
   onEnded?: () => void
+  /** Encoder max bitrate ceiling in bits/s. WebRTC adapts down on
+   *  congestion; this is a ceiling, not a floor. */
+  bitrate?: number
 }): Promise<ScreenShareResult> {
   const dmOpts = {
     video: {
@@ -302,7 +310,7 @@ export async function startScreenShare(opts: {
     try {
       const params = _videoSender.getParameters()
       if (!params.encodings) params.encodings = [{}]
-      params.encodings[0].maxBitrate = 8_000_000
+      params.encodings[0].maxBitrate = opts.bitrate ?? DEFAULT_SCREEN_BITRATE
       params.encodings[0].maxFramerate = 60
       await _videoSender.setParameters(params)
     } catch (e) {
@@ -330,6 +338,24 @@ export async function startScreenShare(opts: {
     screenVideo.addEventListener('ended', opts.onEnded)
   }
   return { stream, withSystemAudio }
+}
+
+/**
+ * Adjust the screen-share encoder's max bitrate on the fly. No-op if we're
+ * not currently sharing a screen (cam stream uses its own implicit ceiling).
+ * Lets the user re-pick a quality preset mid-share without restarting.
+ */
+export async function updateScreenShareBitrate(bitrate: number): Promise<void> {
+  if (!_videoSender || !_screenStream) return
+  try {
+    const params = _videoSender.getParameters()
+    if (!params.encodings) params.encodings = [{}]
+    params.encodings[0].maxBitrate = bitrate
+    params.encodings[0].maxFramerate = 60
+    await _videoSender.setParameters(params)
+  } catch (e) {
+    console.warn('[webrtc] updateScreenShareBitrate failed:', e)
+  }
 }
 
 async function mixScreenAudioIntoMic(screenAudio: MediaStreamTrack): Promise<void> {
@@ -427,6 +453,79 @@ export async function setVideoInputDevice(deviceId: string): Promise<void> {
     t.stop()
   })
   _camStream.addTrack(newTrack)
+}
+
+/**
+ * Patch the Opus fmtp parameters in an SDP so the encoder runs in hi-fi
+ * (stereo, 128 kbps, no DTX, CBR, full 48 kHz playback) instead of the
+ * default voice-call config (mono, ~32 kbps, DTX on). Required to make
+ * screen-share audio sound like music rather than a phone call.
+ *
+ * fmtp parameters are descriptive of the side that emitted them — they
+ * tell the OTHER side how to configure ITS encoder. So both offer and
+ * answer SDPs must be patched for hi-fi to work in both directions.
+ *
+ * Idempotent. No-op if the SDP has no Opus m-line.
+ */
+export function enhanceOpusSdp(sdp: string): string {
+  if (!sdp) return sdp
+  const overrides: Record<string, string> = {
+    'stereo': '1',
+    'sprop-stereo': '1',
+    'maxaveragebitrate': '128000',
+    'maxplaybackrate': '48000',
+    'useinbandfec': '1',
+    'usedtx': '0',
+    'cbr': '1',
+  }
+
+  const lines = sdp.split(/\r?\n/)
+
+  // Find Opus payload types (there can be more than one in theory).
+  const opusPts: string[] = []
+  for (const line of lines) {
+    const m = line.match(/^a=rtpmap:(\d+) opus\/48000\/2/i)
+    if (m) opusPts.push(m[1])
+  }
+  if (opusPts.length === 0) return sdp
+
+  const parseFmtp = (s: string): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const part of s.split(/;\s*/)) {
+      const eq = part.indexOf('=')
+      if (eq > 0) out[part.slice(0, eq).trim()] = part.slice(eq + 1).trim()
+    }
+    return out
+  }
+  const formatFmtp = (params: Record<string, string>): string =>
+    Object.entries(params).map(([k, v]) => `${k}=${v}`).join(';')
+
+  // Walk: rewrite existing fmtp lines for Opus PTs, track which were seen.
+  const seenFmtp = new Set<string>()
+  const rewritten = lines.map((line) => {
+    for (const pt of opusPts) {
+      const m = line.match(new RegExp(`^a=fmtp:${pt} (.*)$`))
+      if (m) {
+        const merged = { ...parseFmtp(m[1]), ...overrides }
+        seenFmtp.add(pt)
+        return `a=fmtp:${pt} ${formatFmtp(merged)}`
+      }
+    }
+    return line
+  })
+
+  // For any Opus PT that lacked an fmtp line, insert one right after its
+  // rtpmap. Walk back-to-front so indices remain stable.
+  const result = [...rewritten]
+  for (const pt of opusPts) {
+    if (seenFmtp.has(pt)) continue
+    const idx = result.findIndex((l) => l.startsWith(`a=rtpmap:${pt} `))
+    if (idx >= 0) {
+      result.splice(idx + 1, 0, `a=fmtp:${pt} ${formatFmtp(overrides)}`)
+    }
+  }
+
+  return result.join('\r\n')
 }
 
 export async function applyRemoteDescription(desc: RTCSessionDescriptionInit): Promise<void> {

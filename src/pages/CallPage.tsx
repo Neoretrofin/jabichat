@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useCallStore } from '../store/callStore'
 import { useChatStore } from '../store/chatStore'
-import { useDeviceStore } from '../store/deviceStore'
+import { useDeviceStore, SCREEN_SHARE_BITRATES, type ScreenShareQuality } from '../store/deviceStore'
 import { useHangup } from '../hooks/useHangup'
 import {
   startScreenShare,
@@ -18,7 +18,15 @@ import {
   setVideoInputDevice,
   supportsAudioOutputSelection,
   sendMediaControl,
+  updateScreenShareBitrate,
 } from '../lib/webrtc'
+
+const SCREEN_SHARE_QUALITY_LABELS: { value: ScreenShareQuality; label: string }[] = [
+  { value: 'low',    label: 'Низкое (5 Mbps)' },
+  { value: 'medium', label: 'Среднее (10 Mbps)' },
+  { value: 'high',   label: 'Высокое (15 Mbps)' },
+  { value: 'max',    label: 'Максимальное (25 Mbps)' },
+]
 import { startOutgoingRing, stopOutgoingRing } from '../lib/sound'
 import Avatar from '../components/Avatar'
 import { contactDisplayName } from '../types/chat'
@@ -222,6 +230,7 @@ export default function CallPage() {
     }
     try {
       const { stream, withSystemAudio } = await startScreenShare({
+        bitrate: SCREEN_SHARE_BITRATES[devicePrefs.screenShareQuality],
         onEnded: () => {
           setScreenStream(null)
           setShareHasAudio(false)
@@ -233,6 +242,15 @@ export default function CallPage() {
       if (!(err instanceof Error && err.name === 'NotAllowedError')) {
         console.error('Screen share failed:', err)
       }
+    }
+  }
+
+  const handleScreenShareQuality = async (q: ScreenShareQuality) => {
+    devicePrefs.setScreenShareQuality(q)
+    // Apply immediately if we're already sharing — otherwise the new value
+    // takes effect on the next startScreenShare.
+    if (sharing) {
+      try { await updateScreenShareBitrate(SCREEN_SHARE_BITRATES[q]) } catch (e) { console.warn(e) }
     }
   }
 
@@ -440,6 +458,17 @@ export default function CallPage() {
               <option key={d.deviceId} value={d.deviceId}>
                 {d.label || `Камера (${d.deviceId.slice(0, 6)})`}
               </option>
+            ))}
+          </select>
+
+          <p className="text-lily-green/50 text-xs uppercase tracking-wider mb-1.5">Качество трансляции</p>
+          <select
+            value={devicePrefs.screenShareQuality}
+            onChange={(e) => handleScreenShareQuality(e.target.value as ScreenShareQuality)}
+            className="w-full bg-swamp-dark border border-frog-dark/40 rounded-xl px-3 py-2 text-lily-green text-sm outline-none mb-3"
+          >
+            {SCREEN_SHARE_QUALITY_LABELS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
 
