@@ -2,12 +2,14 @@ import { useRef, useState } from 'react'
 import {
   Copy, LogOut, Eye, EyeOff, CheckCheck, Wifi, WifiOff,
   Pencil, Check, Camera, Loader2, AlertCircle,
-  Sun, Moon, Sprout,
+  Sun, Moon, Sprout, Radio, Settings2,
 } from 'lucide-react'
 import { useNostrStore } from '../store/nostrStore'
 import { useThemeStore, type Theme } from '../store/themeStore'
 import { uploadImage } from '../lib/upload'
 import Avatar from '../components/Avatar'
+import RelaySettingsModal from '../components/RelaySettingsModal'
+import { useRelayStatus } from '../hooks/useRelayStatus'
 
 const THEME_OPTIONS: { value: Theme; label: string; Icon: typeof Sprout }[] = [
   { value: 'jabi', label: 'Жаби', Icon: Sprout },
@@ -17,7 +19,7 @@ const THEME_OPTIONS: { value: Theme; label: string; Icon: typeof Sprout }[] = [
 
 export default function ProfilePage() {
   const {
-    npub, nsec, isConnected, logout,
+    npub, nsec, logout,
     profileName, setProfileName,
     avatar, setAvatar,
     publishMetadata, ndk,
@@ -31,7 +33,11 @@ export default function ProfilePage() {
   const [nameInput, setNameInput] = useState(profileName)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [showRelaySettings, setShowRelaySettings] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const { total: relayTotal, connected: relayConnected } = useRelayStatus()
+  const anyConnected = relayConnected > 0
 
   const copy = async (text: string, type: 'npub' | 'nsec') => {
     await navigator.clipboard.writeText(text)
@@ -127,15 +133,21 @@ export default function ProfilePage() {
             </button>
           )}
           <div className="flex items-center gap-1.5 mt-1">
-            {isConnected ? (
+            {anyConnected ? (
               <>
                 <Wifi size={12} className="text-frog-skin" />
-                <span className="text-frog-skin text-xs">Подключён к реле</span>
+                <span className="text-frog-skin text-xs">
+                  Подключено {relayConnected} из {relayTotal} реле
+                </span>
               </>
             ) : (
               <>
                 <WifiOff size={12} className="text-lily-green/50" />
-                <span className="text-lily-green/50 text-xs">Не подключён</span>
+                <span className="text-lily-green/50 text-xs">
+                  {relayTotal > 0
+                    ? `Не подключён (0 из ${relayTotal})`
+                    : 'Список реле пуст'}
+                </span>
               </>
             )}
           </div>
@@ -171,6 +183,30 @@ export default function ProfilePage() {
             )
           })}
         </div>
+      </div>
+
+      {/* Relays */}
+      <div className="bg-swamp-darker rounded-2xl p-4 border border-frog-dark/20 mb-4">
+        <p className="text-lily-green/50 text-xs font-semibold uppercase tracking-wider mb-3">Реле</p>
+        <button
+          onClick={() => setShowRelaySettings(true)}
+          className="w-full flex items-center justify-between gap-3 bg-swamp-dark hover:bg-swamp-dark/60 border border-frog-dark/30 hover:border-frog-skin/40 rounded-xl px-3 py-2.5 transition-colors"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Radio size={16} className={anyConnected ? 'text-frog-skin' : 'text-lily-green/40'} />
+            <div className="flex flex-col items-start min-w-0">
+              <span className="text-lily-green text-sm">
+                {relayTotal > 0
+                  ? `${relayConnected} из ${relayTotal} подключено`
+                  : 'Список реле пуст'}
+              </span>
+              <span className="text-lily-green/40 text-[11px]">
+                Управление и кастомные URL
+              </span>
+            </div>
+          </div>
+          <Settings2 size={14} className="text-lily-green/50 shrink-0" />
+        </button>
       </div>
 
       {/* Keys */}
@@ -212,6 +248,8 @@ export default function ProfilePage() {
         <LogOut size={16} />
         Выйти из аккаунта
       </button>
+
+      {showRelaySettings && <RelaySettingsModal onClose={() => setShowRelaySettings(false)} />}
     </div>
   )
 }

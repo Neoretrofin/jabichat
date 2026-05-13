@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import NDK, { NDKEvent, NDKKind } from '@nostr-dev-kit/ndk'
 import { createNDK, generateNsec, nsecToNpub } from '../lib/ndk'
+import { useRelayStore } from './relayStore'
 import { npubToHex } from './../lib/dm'
 
 interface NostrState {
@@ -48,7 +49,8 @@ export const useNostrStore = create<NostrState>()(
       login: async (nsec: string) => {
         const trimmed = nsec.trim()
         const npub = nsecToNpub(trimmed)
-        const ndk = createNDK(trimmed)
+        const relayUrls = useRelayStore.getState().relayUrls
+        const ndk = createNDK(trimmed, relayUrls)
 
         set({ nsec: trimmed, npub, ndk, isConnecting: true, isConnected: false })
 
